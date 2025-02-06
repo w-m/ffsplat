@@ -1,0 +1,52 @@
+site_name: ffsplat
+repo_url: https://github.com/w-m/ffsplat
+site_url: https://w-m.github.io/ffsplat
+site_description: A conversion tool for splatting scenes.
+site_author: Wieland Morgenstern
+edit_uri: edit/main/docs/
+repo_name: w-m/ffsplat
+copyright: Maintained by <a href="https://w-m.com">w-m</a>.
+
+nav:
+  - Home: index.md
+  - Modules: modules.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["src/ffsplat"]
+theme:
+  name: material
+  feature:
+    tabs: true
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/w-m/ffsplat
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/ffsplat
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
