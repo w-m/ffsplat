@@ -18,9 +18,9 @@ from ._renderer import Renderer, RenderTask
 class CameraState:
     fov: float
     aspect: float
-    c2w: Float32[np.ndarray]  # 4 4
+    c2w: Float32[np.ndarray, "4 4"]
 
-    def get_K(self, img_wh: tuple[int, int]) -> Float32[np.ndarray]:
+    def get_K(self, img_wh: tuple[int, int]) -> Float32[np.ndarray, "3 3"]:
         W, H = img_wh
         focal_length = H / 2.0 / np.tan(self.fov / 2.0)
         K = np.array([
@@ -72,8 +72,8 @@ class Viewer:
         render_fn: Callable[
             [CameraState, tuple[int, int]],
             Union[
-                UInt8[np.ndarray],
-                tuple[UInt8[np.ndarray], Optional[Float32[np.ndarray]]],
+                UInt8[np.ndarray, "H W 3"],
+                tuple[UInt8[np.ndarray, "H W 3"], Optional[Float32[np.ndarray, "H W"]]],
             ],
         ],
         mode: Literal["rendering", "training"] = "rendering",
