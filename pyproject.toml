@@ -21,6 +21,9 @@ dependencies = [
     "gsplat>=1.4.0",
     "torch>=2.6.0",
     "viser>=0.2.23",
+    "jaxtyping>=0.2.25",
+    "numpy>=1.24.0",
+    "plyfile>=1.0.0"
 ]
 
 [[tool.uv.index]]
@@ -60,10 +63,9 @@ dev = [
 requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
-
-
 [tool.mypy]
 files = ["src"]
+exclude = ["src/view/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -71,6 +73,10 @@ check_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true
 show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["gsplat.*", "plyfile.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
