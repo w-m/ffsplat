@@ -1,4 +1,3 @@
-import math
 import time
 from argparse import ArgumentParser
 
@@ -18,18 +17,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    means, quats, scales, opacities, sh0, shN = load_ply(args.data_path)
-    means_t: Float[Tensor, "num_gaussians 3"] = torch.from_numpy(means).to("cuda")
-    quats_t: Float[Tensor, "num_gaussians 4"] = torch.from_numpy(quats).to("cuda")
-    scales_t: Float[Tensor, "num_gaussians 3"] = torch.from_numpy(scales).to("cuda")
-    opacities_t: Float[Tensor, " num_gaussians"] = torch.from_numpy(opacities).to("cuda")
-    sh0_t: Float[Tensor, "num_gaussians 1 3"] = torch.from_numpy(sh0).to("cuda")
-    shN_t: Float[Tensor, "num_gaussians S 3"] = torch.from_numpy(shN).to("cuda")
-    colors: Float[Tensor, "num_gaussians S_total 3"] = torch.cat([sh0_t, shN_t], dim=-2).to("cuda")
-
-    sh_degree = int(math.sqrt(colors.shape[-2]) - 1)
-    scales_t = torch.exp(scales_t)
-    opacities_t = torch.sigmoid(opacities_t)
+    gaussians = load_ply(args.data_path)
+    means_t, quats_t, scales_t, opacities_t, colors = gaussians.to_torch("cuda")
+    sh_degree = gaussians.sh_degree
 
     @torch.no_grad()
     def render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
