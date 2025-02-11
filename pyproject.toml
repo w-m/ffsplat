@@ -45,6 +45,15 @@ Homepage = "https://w-m.github.io/ffsplat/"
 Repository = "https://github.com/w-m/ffsplat"
 Documentation = "https://w-m.github.io/ffsplat/"
 
+[project.scripts]
+ffsplat-view = "ffsplat.cli.view:main"
+# ffsplat-convert = "ffsplat.cli.convert:main"
+# ffsplat-probe = "ffsplat.cli.probe:main"
+# ffsplat-live = "ffsplat.cli.live:main"
+# ffsplat-eval = "ffsplat.cli.eval:main"
+# ffsplat-opt = "ffsplat.cli.opt:main"
+
+
 [dependency-groups]
 dev = [
     "pytest>=7.2.0",
@@ -65,7 +74,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.mypy]
 files = ["src"]
-exclude = ["src/view/.*"]
+exclude = ["src/ffsplat/render/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
