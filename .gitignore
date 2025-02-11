@@ -1,3 +1,6 @@
+# hydra default output directory
+outputs/
+
 docs/source
 
 # From https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore
