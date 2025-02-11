@@ -1,41 +1,12 @@
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 import numpy as np
-import torch
 from jaxtyping import Float
 from numpy.typing import NDArray
 from torch import Tensor
 
-
-@dataclass
-class NamedAttribute:
-    """Generic attribute class that handles Gaussian attributes stored as torch tensors"""
-
-    name: str
-    data: Tensor
-    device: str = "cuda"
-    to_device_fn: Callable[[Tensor, str], Tensor] = lambda x, d: x.to(d)
-
-    @classmethod
-    def from_numpy(
-        cls,
-        name: str,
-        data: NDArray,
-        device: str = "cuda",
-        to_device_fn: Optional[Callable[[Tensor, str], Tensor]] = None,
-    ) -> "NamedAttribute":
-        """Create a NamedAttribute from a numpy array, converting to torch tensor"""
-        tensor = torch.from_numpy(data)
-        if to_device_fn is None:
-            to_device_fn = cls.to_device_fn
-        return cls(name, to_device_fn(tensor, device), device, to_device_fn)
-
-    def to(self, device: str) -> None:
-        """Move the tensor to specified device in-place"""
-        if device != self.device:
-            self.data = self.to_device_fn(self.data, device)
-            self.device = device
+from .attribute import NamedAttribute
 
 
 @dataclass
@@ -54,35 +25,37 @@ class Gaussians:
 
     @property
     def sh_degree(self) -> int:
-        """Calculate spherical harmonics degree from the data shape"""
+        """Calculate spherical harmonics degree from the data shape."""
         return int(np.sqrt(self.sh.data.shape[1] - 1) - 1)  # -1 for sh0
 
     @property
     def sh0(self) -> Tensor:
-        """Get the DC term (sh0) of spherical harmonics"""
-        return self.sh.data[:, :1, :]
+        """Get the DC term of the spherical harmonics."""
+        return self.sh.data[:, 0]
 
     @property
     def shN(self) -> Tensor:
-        """Get the higher-order terms (shN) of spherical harmonics"""
-        return self.sh.data[:, 1:, :]
+        """Get the higher-order spherical harmonics coefficients."""
+        return self.sh.data[:, 1:]
 
     def to(self, device: str) -> None:
-        """Move all attributes to specified device in-place"""
+        """Move all attributes to specified device in-place."""
         for attr in [self.means, self.quaternions, self.scales, self.opacities, self.sh]:
             attr.to(device)
 
     def to_torch(self, device: Optional[str] = None) -> tuple[Tensor, ...]:
-        """Get all attributes as PyTorch tensors"""
+        """Get all transformed attributes as PyTorch tensors."""
         if device is not None:
             self.to(device)
 
+        sh_data = self.sh(None)  # Get transformed spherical harmonics data
+
         return (
-            self.means.data,
-            self.quaternions.data,
-            self.scales.data,
-            self.opacities.data,
-            self.sh.data,
+            self.means(None),
+            self.quaternions(None),
+            self.scales(None),
+            self.opacities(None),
+            sh_data,  # Full spherical harmonics data
         )
 
     @classmethod
@@ -97,14 +70,17 @@ class Gaussians:
         shN: Float[NDArray, "N S 3"],
         device: str = "cuda",
     ) -> "Gaussians":
-        """Create a Gaussians instance from numpy arrays"""
-        # Combine sh0 and shN into a single array
+        """Create a Gaussians instance from numpy arrays."""
+        # Combine sh0 and shN into a single array for storage
         sh_combined = np.concatenate([sh0, shN], axis=1)
 
         return cls(
             means=NamedAttribute.from_numpy("means", means, device),
             quaternions=NamedAttribute.from_numpy("quaternions", quats, device),
-            scales=NamedAttribute.from_numpy("scales", scales, device, lambda x, d: torch.exp(x.to(d))),
-            opacities=NamedAttribute.from_numpy("opacities", opacities, device, lambda x, d: torch.sigmoid(x.to(d))),
+            # Scales use exp activation
+            scales=NamedAttribute.from_numpy("scales", scales, device, remap_method="exp"),
+            # Opacities use sigmoid activation
+            opacities=NamedAttribute.from_numpy("opacities", opacities, device, remap_method="sigmoid"),
+            # SH stored as concatenated data - no special transform needed
             sh=NamedAttribute.from_numpy("sh", sh_combined, device),
         )
