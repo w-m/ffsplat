@@ -34,7 +34,7 @@ class Gaussians:
     quaternions: NamedAttribute
     scales: NamedAttribute
     opacities: NamedAttribute
-    harmonics: tuple[NamedAttribute, NamedAttribute]  # (sh0, shN)
+    sh: NamedAttribute  # Combined spherical harmonics (sh0 and shN)
     _device: Optional[str] = None
 
     @property
@@ -44,7 +44,17 @@ class Gaussians:
     @property
     def sh_degree(self) -> int:
         """Calculate spherical harmonics degree from the data shape"""
-        return int(np.sqrt(self.harmonics[1].data.shape[1] + 1) - 1)
+        return int(np.sqrt(self.sh.data.shape[1] - 1) - 1)  # -1 for sh0
+
+    @property
+    def sh0(self) -> NDArray:
+        """Get the DC term (sh0) of spherical harmonics"""
+        return self.sh.data[:, :1, :]
+
+    @property
+    def shN(self) -> NDArray:
+        """Get the higher-order terms (shN) of spherical harmonics"""
+        return self.sh.data[:, 1:, :]
 
     def to_torch(self, device: Optional[str] = None) -> tuple[Tensor, ...]:
         """Convert all attributes to PyTorch tensors"""
@@ -55,9 +65,7 @@ class Gaussians:
         quats_t = self.quaternions.to_torch(self.device)
         scales_t = self.scales.to_torch(self.device)
         opacities_t = self.opacities.to_torch(self.device)
-        sh0_t = self.harmonics[0].to_torch(self.device)
-        shN_t = self.harmonics[1].to_torch(self.device)
-        colors_t = torch.cat([sh0_t, shN_t], dim=-2)
+        colors_t = self.sh.to_torch(self.device)
 
         return means_t, quats_t, scales_t, opacities_t, colors_t
 
@@ -73,6 +81,9 @@ class Gaussians:
         shN: Float[NDArray, "N S 3"],
     ) -> "Gaussians":
         """Create a Gaussians instance from numpy arrays"""
+        # Combine sh0 and shN into a single array
+        sh_combined = np.concatenate([sh0, shN], axis=1)
+
         return cls(
             means=NamedAttribute.from_numpy("means", means),
             quaternions=NamedAttribute.from_numpy("quaternions", quats),
@@ -80,5 +91,5 @@ class Gaussians:
             opacities=NamedAttribute.from_numpy(
                 "opacities", opacities, lambda x, d: torch.sigmoid(torch.from_numpy(x).to(d))
             ),
-            harmonics=(NamedAttribute.from_numpy("sh0", sh0), NamedAttribute.from_numpy("shN", shN)),
+            sh=NamedAttribute.from_numpy("sh", sh_combined),
         )
