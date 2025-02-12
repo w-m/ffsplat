@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Callable, Literal, overload
+from typing import Any, Callable, Literal
 
 import torch
 from numpy.typing import NDArray
 from torch import Tensor, nn
-from torch import device as torch_device
-from torch import dtype as torch_dtype
 
 from .exceptions import (
     BackwardNotImplementedError,
@@ -22,6 +20,93 @@ from .exceptions import (
 )
 
 
+class EncodingTransform(nn.Module):
+    def _init_from_encoding_config(self, **encoding_config) -> None:
+        self._encoding_config = encoding_config
+        self._decoding_params = {}
+
+    def _init_from_decoding_params(self, **decoding_params) -> None:
+        self._encoding_config = {}
+        self._decoding_params = decoding_params
+
+    def encode(self, data: Tensor) -> Tensor:
+        return data
+
+    def decode(self, data: Tensor) -> Tensor:
+        return data
+
+    @property
+    def encoding_config(self) -> dict[str, Any]:
+        return self._encoding_config
+
+    @property
+    def decoding_params(self) -> dict[str, Any]:
+        return self._decoding_params
+
+    def forward(self, data: Tensor) -> Tensor:
+        """Forward processing is decoding raw data into a form suitable for rendering."""
+        return self.decode(data)
+
+    def inverse(self, data: Tensor) -> Tensor:
+        """Backward processing is encoding data into a form suitable for storage."""
+        return self.encode(data)
+
+    @classmethod
+    def from_encoding_config(cls, **encoding_config) -> EncodingTransform:
+        """Create an encoding transform from encoding configuration."""
+        obj = cls()
+        obj._init_from_encoding_config(**encoding_config)
+        return obj
+
+    @classmethod
+    def from_decoding_params(cls, **decoding_params) -> EncodingTransform:
+        """Create an encoding transform from decoding parameters."""
+        obj = cls()
+        obj._init_from_decoding_params(**decoding_params)
+        return obj
+
+
+class QuantizationTransform(EncodingTransform):
+    """Quantize the input tensor to a fixed number of bits."""
+
+    def _init_from_encoding_config(self, num_bits: int) -> None:
+        super()._init_from_encoding_config(num_bits=num_bits)
+
+        if self.num_bits <= 0:
+            raise ValueError(f"Number of bits in quantization must be a positive integer, got {num_bits}")
+
+        self.num_bits = num_bits
+
+    def encode(self, data: Tensor) -> Tensor:
+        # Quantize the data to the specified number of bits
+        # Note: We're assuming the input is in the range [0, 1]
+        # For a more general case, you'd need to scale the data to [0, 1] first
+        return torch.round(data * (2**self.num_bits - 1)) / (2**self.num_bits - 1)
+
+
+class TrimmingTransform(EncodingTransform):
+    """Trim away a number of elements by removing the last N elements."""
+
+    def _init_from_encoding_config(self, num_elements_to_trim: int) -> None:
+        super()._init_from_encoding_config(num_elements_to_trim=num_elements_to_trim)
+        self.num_elements_to_trim = num_elements_to_trim
+
+    def encode(self, data: Tensor) -> Tensor:
+        return data[: -self.num_elements_to_trim]
+
+
+class ClampingTransform(EncodingTransform):
+    """Clamp the input tensor to a specified range."""
+
+    def __init__(self, min_val: float, max_val: float) -> None:
+        super().__init__(min_val=min_val, max_val=max_val)
+        self.min_val = min_val
+        self.max_val = max_val
+
+    def encode(self, data: Tensor) -> Tensor:
+        return torch.clamp(data, self.min_val, self.max_val)
+
+
 class NamedAttribute(nn.Module):
     """
     An attribute with a name and data tensor, with optional transforms applied in a fixed order:
@@ -34,16 +119,26 @@ class NamedAttribute(nn.Module):
     """
 
     name: str
-    device_str: str
-    data: Tensor
-    to_device_fn: Callable[[Tensor, str], Tensor]
+
+    raw_data: Tensor
+    coding: EncodingTransform
+    reshaping: GridTransform
+    trimming: TrimmingTransform
+    coding_dtype: DTypeTransform
+    quantization: QuantizationTransform
+    bit_shift: BitshiftTransform
+    combine: CombineTransform
+    combined_dtype: DTypeTransform
+    rescaling: RescalingTransform
+    clamping: ClampingTransform
+    remapping: RemappingTransform
 
     def __init__(
         self,
+        # force keyword arguments for clarity
+        *,
         name: str,
         data: Tensor,
-        device: str = "cuda",
-        to_device_fn: Callable[[Tensor, str], Tensor] | None = None,
         # Transform params with defaults for no-op behavior
         initial_dtype: torch.dtype | None = None,
         bitshift_amount: int = 0,
@@ -61,11 +156,9 @@ class NamedAttribute(nn.Module):
     ) -> None:
         super().__init__()
         self.name = name
-        self.device_str = device  # Store string version separately
-        self.to_device_fn = to_device_fn or (lambda x, d: x.to(d))
 
         # Register the data as a buffer so it moves with the module
-        self.register_buffer("data", self.to_device_fn(data, device))
+        self.register_buffer("data", data)
 
         # Initialize transforms that we'll use (all default to no-op)
         if initial_dtype is not None:
@@ -93,63 +186,26 @@ class NamedAttribute(nn.Module):
             self.remap = RemappingTransform(remap_method)
 
         if flatten_start_dim is not None and flatten_end_dim is not None:
-            self.flatten = FlattenTransform(flatten_start_dim, flatten_end_dim)
+            self.flatten = GridTransform(flatten_start_dim, flatten_end_dim)
 
     @property
-    def device(self) -> str:
-        """Get the current device as a string."""
-        return self.device_str
+    def device(self) -> torch.device:
+        return self.raw_data.device
 
-    @overload
-    def to(
-        self,
-        device: str | torch_device | int | None,
-        *,
-        dtype: torch_dtype | None = None,
-        non_blocking: bool = False,
-    ) -> NamedAttribute: ...
-
-    @overload
-    def to(self, dtype_arg: torch_dtype, *, non_blocking: bool = False) -> NamedAttribute: ...
-
-    @overload
-    def to(self, tensor: Tensor, *, non_blocking: bool = False) -> NamedAttribute: ...
-
-    def to(
-        self,
-        device_or_dtype: str | torch_device | torch_dtype | Tensor | int | None,
-        *,
-        dtype: torch_dtype | None = None,
-        non_blocking: bool = False,
-    ) -> NamedAttribute:
-        """Move the attribute to the specified device/dtype."""
-        if isinstance(device_or_dtype, (str, torch_device, int)) or device_or_dtype is None:
-            # Handle device move
-            device_str = str(device_or_dtype) if device_or_dtype is not None else self.device_str
-            if device_str != self.device_str:
-                self.data = self.to_device_fn(self.data, device_str)
-                self.device_str = device_str
-                super().to(device_str)
-        elif isinstance(device_or_dtype, torch_dtype):
-            # Handle dtype passed as first argument
-            self.data = self.data.to(dtype=device_or_dtype, non_blocking=non_blocking)
-        elif isinstance(device_or_dtype, Tensor):
-            # Handle tensor device/dtype move
-            self.data = self.data.to(device_or_dtype.device, dtype=device_or_dtype.dtype, non_blocking=non_blocking)
-
-        # Handle explicit dtype parameter
-        if dtype is not None:
-            self.data = self.data.to(dtype=dtype, non_blocking=non_blocking)
-
-        return self
+    def to(self, device) -> NamedAttribute:
+        """Move the data tensor to a new device."""
+        if self.device == device:
+            return self
 
     def forward(self, context: Mapping[str, Tensor | NamedAttribute] | None = None) -> Tensor:
         """Apply transforms in fixed order."""
-        data = self.data
+        data = self.raw_data
 
         # Convert context values from NamedAttribute to Tensor if needed
         if context is not None:
-            context = {name: attr.data if isinstance(attr, NamedAttribute) else attr for name, attr in context.items()}
+            context = {
+                name: attr.raw_data if isinstance(attr, NamedAttribute) else attr for name, attr in context.items()
+            }
 
         # Step 1: Initial dtype + bitshift
         if hasattr(self, "initial_dtype_transform"):
@@ -229,26 +285,34 @@ class NamedAttribute(nn.Module):
         return cls(name=name, data=tensor, device=device, to_device_fn=to_device_fn, **transform_kwargs)
 
 
-class BitshiftTransform(nn.Module):
-    """Shift integer data left by shift_amount in forward; right for backward."""
+class BitshiftTransform(EncodingTransform):
+    """Shift integer right for encoding, left for decoding"""
 
     def __init__(self, shift_amount: int = 0) -> None:
-        super().__init__()
+        super().__init__(shift_amount=shift_amount)
+
+        if shift_amount < 0:
+            raise ValueError(f"Shift amount must be non-negative, got {shift_amount}")
+
         self.shift_amount = shift_amount
 
-    def forward(self, data: Tensor) -> Tensor:
-        if self.shift_amount != 0 and not torch.is_floating_point(data):
-            return data << self.shift_amount
-        return data
+    def encode(self, data: Tensor) -> Tensor:
+        if torch.is_floating_point(data):
+            raise ValueError("Bitshift transform is only for integer data")
 
-    def inverse(self, data: Tensor) -> Tensor:
-        """Inverse transform - shift right instead of left."""
-        if self.shift_amount != 0 and not torch.is_floating_point(data):
-            return data >> self.shift_amount
-        return data
+        return data >> self.shift_amount
+
+    def decode(self, data: Tensor) -> Tensor:
+        if torch.is_floating_point(data):
+            raise ValueError("Bitshift transform is only for integer data")
+
+        return data << self.shift_amount
+
+    def decoding_params(self) -> dict[str, Any]:
+        return {"shift_amount": self.shift_amount}
 
 
-class CombineTransform(nn.Module):
+class CombineTransform(EncodingTransform):
     """
     method='concat':  data = torch.concat([data, *others], dim=axis)
     method='logical_or':  data = reduce(operator.or_, (others), data)
@@ -295,18 +359,21 @@ class CombineTransform(nn.Module):
         raise BackwardNotImplementedError(self.method)
 
 
-class DTypeTransform(nn.Module):
-    def __init__(self, target_dtype: torch.dtype) -> None:
-        super().__init__()
+class DTypeTransform(EncodingTransform):
+    def __init__(self, source_dtype: torch.dtype, target_dtype: torch.dtype) -> None:
+        super().__init__(source_dtype=source_dtype, target_dtype=target_dtype)
+        self.source_dtype = source_dtype
         self.target_dtype = target_dtype
 
-    def forward(self, data: Tensor) -> Tensor:
+    def encode(self, data: Tensor) -> Tensor:
+        if data.dtype != self.source_dtype:
+            raise ValueError(f"Expected data to have dtype {self.source_dtype}, got {data.dtype}")
         return data.to(self.target_dtype)
 
-    def inverse(self, data: Tensor) -> Tensor:
-        # For a perfect inverse, you'd have to know the original dtype.
-        # We'll just demonstrate the concept here:
-        return data
+    def decode(self, data: Tensor) -> Tensor:
+        if data.dtype != self.target_dtype:
+            raise ValueError(f"Expected data to have dtype {self.target_dtype}, got {data.dtype}")
+        return data.to(self.source_dtype)
 
 
 class RescalingTransform(nn.Module):
@@ -401,7 +468,7 @@ class RemappingTransform(nn.Module):
             return data
 
 
-class FlattenTransform(nn.Module):
+class GridTransform(nn.Module):
     def __init__(self, start_dim: int, end_dim: int) -> None:
         super().__init__()
         self.start_dim = start_dim

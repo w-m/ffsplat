@@ -67,14 +67,14 @@ def save_ply(gaussians: Gaussians, path: Path) -> None:
         path: Path where to save the PLY file
     """
     # Convert tensors to numpy arrays individually
-    means = gaussians.means.data.cpu().numpy()
-    quats = gaussians.quaternions.data.cpu().numpy()
+    means = gaussians.means_attr.raw_data.cpu().numpy()
+    quats = gaussians.quaternions_attr.raw_data.cpu().numpy()
     # For scales and opacities, we need to invert the transformations
-    scales = torch.log(gaussians.scales.data).cpu().numpy()
-    opacities = torch.logit(gaussians.opacities.data).cpu().numpy()
+    scales = torch.log(gaussians.scales_attr.raw_data).cpu().numpy()
+    opacities = torch.logit(gaussians.opacities_attr.raw_data).cpu().numpy()
 
     # Handle spherical harmonics
-    sh_data = gaussians.sh.data.cpu().numpy()
+    sh_data = gaussians.sh_attr.raw_data.cpu().numpy()
     sh0 = sh_data[:, :1, :]  # (N, 1, 3)
     shN = sh_data[:, 1:, :]  # (N, S, 3)
 

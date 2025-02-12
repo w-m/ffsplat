@@ -30,7 +30,7 @@ def render_fn(
     K: Float[Tensor, "3 3"] = torch.from_numpy(camera_K).float().to("cuda")
     viewmat: Float[Tensor, "4 4"] = torch.linalg.inv(c2w)
     # We need to separate the type annotation from the unpacking
-    raster_out: tuple[Float[Tensor, "1 H W 4"], Tensor, Tensor] = rasterization(
+    raster_out: tuple[Float[Tensor, "1 H W 4"], Tensor, dict] = rasterization(
         means_t,  # [N, 3]
         quats_t,  # [N, 4]
         scales_t,  # [N, 3]
@@ -56,15 +56,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    gaussians = load_ply(args.data_path)
-
-    # Get all transformed tensors - context handled internally by Gaussians
-    means_t, quats_t, scales_t, opacities_t, colors = gaussians.to_torch("cuda")
-    sh_degree = gaussians.sh_degree  # Uses raw data directly
+    gaussians = load_ply(args.data_path).to("cuda")
 
     # Create render function with bound parameters
     def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
-        return render_fn(means_t, quats_t, scales_t, opacities_t, colors, sh_degree, camera_state, img_wh)
+        return render_fn(gaussians.means_attr, quats_t, scales_t, opacities_t, colors, sh_degree, camera_state, img_wh)
 
     server = viser.ViserServer(verbose=False)
     viewer = Viewer(server=server, render_fn=bound_render_fn, mode="rendering")

@@ -1,6 +1,11 @@
 """Exception classes for attribute transforms."""
 
 
+class QuantizationConfigurationError(Exception):
+    def __init__(self, num_bits) -> None:
+        super().__init__(f"Number of bits must be a positive integer, got {num_bits}")
+
+
 class CombineError(Exception):
     """Errors related to the CombineTransform operations."""
 
