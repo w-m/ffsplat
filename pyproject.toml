@@ -135,7 +135,9 @@ ignore = [
     # DoNotAssignLambda
     "E731",
     # Syntax error in forward annotation, required for jaxtyping (https://docs.kidger.site/jaxtyping/faq/)
-    "F722"
+    "F722",
+    # Checks for long exception messages that are not defined in the exception class itself, doesn't allow `ValueError("message")`
+    "TRY003",
 ]
 
 [tool.ruff.lint.per-file-ignores]

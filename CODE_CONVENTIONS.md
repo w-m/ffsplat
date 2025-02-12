@@ -61,46 +61,6 @@ opacities: Float[NDArray, "N"]  # May cause issues with static type checkers
 opacities: Float[NDArray, " N"]  # Space before N prevents conflicts
 ```
 
-## Exception Handling
-
-### Custom Exception Classes
-
-Define custom exceptions for specific error cases instead of using generic exceptions with messages:
-
-```python
-# ❌ Don't do this
-if not valid:
-    raise ValueError("Invalid configuration: missing required fields")
-
-# ✅ Do this instead
-class InvalidConfigError(Exception):
-    """Error when configuration is invalid."""
-    def __init__(self) -> None:
-        super().__init__("Invalid configuration: missing required fields")
-
-if not valid:
-    raise InvalidConfigError()
-```
-
-### Exception Hierarchies
-
-Create exception hierarchies for related error types:
-
-```python
-class TransformError(Exception):
-    """Base class for transform-related errors."""
-    pass
-
-class RescalingError(TransformError):
-    """Base class for rescaling-specific errors."""
-    pass
-
-class ZeroRangeError(RescalingError):
-    """Error when the rescaling range is zero."""
-    def __init__(self) -> None:
-        super().__init__("Zero range in rescaling transform")
-```
-
 ## PyTorch Patterns
 
 ### Device Management
