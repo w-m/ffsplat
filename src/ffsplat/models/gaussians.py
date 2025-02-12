@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 from jaxtyping import Float
 from numpy.typing import NDArray
 from torch import Tensor
@@ -19,7 +20,7 @@ class Gaussians:
     sh_attr: NamedAttribute  # Combined spherical harmonics (sh0 and shN)
 
     @property
-    def device(self) -> str:
+    def device(self) -> torch.device:
         return self.means_attr.device
 
     @property
