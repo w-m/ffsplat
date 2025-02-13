@@ -4,7 +4,9 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Self, TypeVar
 
+import numpy as np
 import torch
+from numpy.typing import NDArray
 from torch import Tensor
 
 E = TypeVar("E")  # encoding config type
@@ -600,3 +602,111 @@ class NamedAttribute:
 
         self._scene_params = data
         return data
+
+    @classmethod
+    def from_scene_params(
+        cls,
+        *,
+        name: str,
+        scene_params: Tensor | NDArray,
+        remapping: Literal["exp", "sigmoid"] | None = None,
+        clamping: tuple[float | None, float | None] | None = None,
+        rescaling: tuple[float, float] | None = None,
+        combined_dtype: torch.dtype | None = None,
+        logical_or: bool = False,
+        split: tuple[int, int] | None = None,
+        codebook: NamedAttribute | None = None,
+        bit_shift: int | None = None,
+        quantization: int | None = None,
+        coding_dtype: torch.dtype | None = None,
+        trimming: int | None = None,
+        reshaping: bool = False,
+        coding: dict[str, Any] | None = None,
+    ) -> Self:
+        """Create a NamedAttribute configured for encoding from scene_params to packed_data."""
+        config = AttributeEncodingConfig(
+            remapping=RemappingEncodingConfig(method=remapping) if remapping else None,
+            clamping=ClampingEncodingConfig(min_val=clamping[0], max_val=clamping[1]) if clamping else None,
+            rescaling=RescalingEncodingConfig(target_min=rescaling[0], target_max=rescaling[1]) if rescaling else None,
+            combined_dtype=DTypeEncodingConfig(dtype=combined_dtype) if combined_dtype else None,
+            logical_or=None,  # Just pass None since it's a flag
+            split=SplitEncodingConfig(split_dim=split[0], split_size=split[1]) if split else None,
+            codebook=CodebookLookupEncodingConfig(codebook=codebook) if codebook else None,
+            bit_shift=BitShiftEncodingConfig(right_shift=bit_shift) if bit_shift else None,
+            quantization=QuantizationEncodingConfig(num_bits=quantization) if quantization else None,
+            coding_dtype=DTypeEncodingConfig(dtype=coding_dtype) if coding_dtype else None,
+            trimming=TrimmingEncodingConfig(num_elements_to_trim=trimming) if trimming else None,
+            reshaping=None,  # Just pass None since it's a flag
+            coding=coding or {},
+        )
+
+        if isinstance(scene_params, np.ndarray):
+            scene_params = torch.from_numpy(scene_params)
+
+        # Initialize with transforms based on flags
+        result = cls(name=name, encoding_config=config, scene_params=scene_params)
+        if logical_or:
+            result.logical_or = LogicalOrTransform()
+        if reshaping:
+            result.reshaping = SquareGridTransform()
+        return result
+
+    @classmethod
+    def from_packed_data(
+        cls,
+        *,
+        name: str,
+        packed_data: Tensor | NDArray,
+        remapping: Literal["exp", "sigmoid"] | None = None,
+        rescaling: tuple[float, float, float, float] | None = None,
+        combined_dtype: tuple[torch.dtype, torch.dtype] | None = None,
+        logical_or: bool = False,
+        split: tuple[int, list[NamedAttribute]] | None = None,
+        codebook: NamedAttribute | None = None,
+        bit_shift: int | None = None,
+        reshaping: bool = False,
+        coding: dict[str, Any] | None = None,
+    ) -> Self:
+        """Create a NamedAttribute configured for decoding from packed_data to scene_params.
+
+        Args:
+            name: Name of the attribute
+            packed_data: Data to decode, can be either a torch.Tensor or a numpy.ndarray
+            remapping: Optional remapping method to apply during decode
+            rescaling: Optional (orig_min, orig_max, target_min, target_max) for rescaling
+            combined_dtype: Optional (orig_dtype, target_dtype) for dtype conversion
+            logical_or: Whether to apply logical OR transform
+            split: Optional (concat_dim, attributes) for split/concat
+            codebook: Optional codebook for lookup
+            bit_shift: Optional number of bits to left shift
+            reshaping: Whether to reshape to/from square grid
+            coding: Optional coding parameters
+        """
+        # Convert numpy array to tensor if needed
+        if isinstance(packed_data, np.ndarray):
+            packed_data = torch.from_numpy(packed_data)
+
+        params = AttributeDecodingParams(
+            remapping=RemappingDecodingParams(method=remapping) if remapping else None,
+            rescaling=RescalingDecodingParams(
+                orig_min=rescaling[0], orig_max=rescaling[1], target_min=rescaling[2], target_max=rescaling[3]
+            )
+            if rescaling
+            else None,
+            combined_dtype=DTypeDecodingParams(orig_dtype=combined_dtype[0], target_dtype=combined_dtype[1])
+            if combined_dtype
+            else None,
+            logical_or=None,  # Just pass None since it's a flag
+            split=SplitDecodingParams(concat_dim=split[0], attributes=split[1]) if split else None,
+            codebook=CodebookLookupDecodingParams(codebook=codebook) if codebook else None,
+            bit_shift=BitShiftDecodingParams(left_shift=bit_shift) if bit_shift else None,
+            reshaping=None,  # Just pass None since it's a flag
+            coding=coding or {},
+        )
+        # Initialize with transforms based on flags
+        result = cls(name=name, decoding_params=params, packed_data=packed_data)
+        if logical_or:
+            result.logical_or = LogicalOrTransform()
+        if reshaping:
+            result.reshaping = SquareGridTransform()
+        return result

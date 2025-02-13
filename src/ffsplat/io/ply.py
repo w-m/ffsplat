@@ -1,16 +1,9 @@
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
-import torch
-from numpy.typing import NDArray
 from plyfile import PlyData, PlyElement
 
-from ..models.attribute import (
-    AttributeDecodingParams,
-    NamedAttribute,
-    RemappingDecodingParams,
-)
+from ..models.attribute import NamedAttribute
 from ..models.gaussians import Gaussians
 
 
@@ -59,24 +52,12 @@ def load_ply(path: Path) -> Gaussians:
     # Combine sh0 and shN into a single array
     sh_combined = np.concatenate([sh0, shN], axis=1)
 
-    device = "cuda"
-
-    def create_attribute(
-        name: str, data: NDArray, remap_method: Literal["exp", "sigmoid"] | None = None
-    ) -> NamedAttribute:
-        packed_tensor = torch.from_numpy(data).to(device)
-        if remap_method:
-            config = AttributeDecodingParams(remapping=RemappingDecodingParams(method=remap_method))
-        else:
-            config = AttributeDecodingParams()
-        return NamedAttribute(name=name, packed_data=packed_tensor, decoding_params=config)
-
     return Gaussians(
-        means_attr=create_attribute("means", means),
-        quaternions_attr=create_attribute("quaternions", quats),
-        scales_attr=create_attribute("scales", scales, remap_method="exp"),
-        opacities_attr=create_attribute("opacities", opacities, remap_method="sigmoid"),
-        sh_attr=create_attribute("sh", sh_combined),
+        means_attr=NamedAttribute.from_packed_data(name="means", packed_data=means),
+        quaternions_attr=NamedAttribute.from_packed_data(name="quaternions", packed_data=quats),
+        scales_attr=NamedAttribute.from_packed_data(name="scales", packed_data=scales, remapping="exp"),
+        opacities_attr=NamedAttribute.from_packed_data(name="opacities", packed_data=opacities, remapping="sigmoid"),
+        sh_attr=NamedAttribute.from_packed_data(name="sh", packed_data=sh_combined),
     )
 
 
