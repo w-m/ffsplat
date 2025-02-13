@@ -34,6 +34,8 @@ class BlenderParser(DataParser):
         self.camera_ids: list[int] = []  # (num_images,)
         self.Ks_dict: Mapping[int, Float[NDArray, "3 3"]] = {}  # camera_id -> K
         self.imsize_dict: Mapping[int, tuple[int, int]] = {}  # camera_id -> (width, height)
+        self.params_dict = {}
+        self.mask_dict = {}
 
         self.load_synthetic(data_dir, "transforms_train.json", 0)
 
@@ -103,6 +105,9 @@ class BlenderParser(DataParser):
                     image.width,
                     image.height,
                 )
+                # assume no distortion
+                self.params_dict[camera_id] = np.empty(0, dtype=np.float32)
+                self.mask_dict[camera_id] = None
                 self.image_names.append(image_name)
                 self.image_paths.append(image_path)
         return

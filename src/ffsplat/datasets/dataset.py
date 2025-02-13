@@ -4,6 +4,7 @@
 from collections.abc import Mapping
 from typing import Any
 
+import cv2
 import numpy as np
 import torch
 from PIL import Image
@@ -39,6 +40,8 @@ class Dataset:
         image = Image.open(self.parser.image_paths[index])
         camtoworlds = self.parser.camtoworlds[index]
         K = self.parser.Ks_dict[camera_id].copy()
+        params = self.parser.params_dict[camera_id]
+        mask = self.parser.mask_dict[camera_id]
 
         image = np.array(image) / 255.0
         bg = np.array([1.0, 1.0, 1.0]) if self.white_background else np.array([0.0, 0.0, 0.0])
@@ -46,12 +49,25 @@ class Dataset:
         image = image[:, :, :3] * (image[:, :, 3:4]) + bg * (1 - (image[:, :, 3:4]))
         image = image[..., :3]
 
+        if len(params) > 0:
+            # Images are distorted. Undistort them.
+            mapx, mapy = (
+                self.parser.mapx_dict[camera_id],
+                self.parser.mapy_dict[camera_id],
+            )
+            image = cv2.remap(image, mapx, mapy, cv2.INTER_LINEAR)
+            x, y, w, h = self.parser.roi_undist_dict[camera_id]
+            image = image[y : y + h, x : x + w]
+
         data = {
             "K": torch.from_numpy(K).float(),
             "camtoworld": torch.from_numpy(camtoworlds).float(),
             "image": torch.from_numpy(image).float(),
             "image_id": item,  # the index of the image in the dataset
         }
+
+        if mask is not None:
+            data["mask"] = torch.from_numpy(mask).bool()
 
         if self.load_depths:
             # projected points to image plane to get depths
