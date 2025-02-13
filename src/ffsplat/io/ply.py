@@ -1,9 +1,17 @@
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from plyfile import PlyData, PlyElement
+from torch import Tensor
 
+from ..models.attribute import (
+    AttributeDecodingParams,
+    NamedAttribute,
+    RemappingDecodingParams,
+)
 from ..models.gaussians import Gaussians
 
 
@@ -29,14 +37,14 @@ def load_ply(path: Path) -> Gaussians:
         data["vertex"]["rot_3"],
     ]).T
 
-    # Load scale factors
+    # Load scale factors (already in log space)
     scales = np.vstack([
         data["vertex"]["scale_0"],
         data["vertex"]["scale_1"],
         data["vertex"]["scale_2"],
     ]).T
 
-    # Load opacity values
+    # Load opacity values (already in logit space)
     opacities = data["vertex"]["opacity"]
 
     # Load base color (spherical harmonics DC term)
@@ -49,13 +57,27 @@ def load_ply(path: Path) -> Gaussians:
     shN = np.vstack([data["vertex"][f"f_rest_{i}"] for i in range(f_rest_count)]).T
     shN = shN.reshape(means.shape[0], 3, f_rest_count // 3).transpose(0, 2, 1)  # shape: (N, S, 3)
 
-    return Gaussians.from_numpy(
-        means=means,
-        quats=quats,
-        scales=scales,
-        opacities=opacities,
-        sh0=sh0,
-        shN=shN,
+    # Combine sh0 and shN into a single array
+    sh_combined = np.concatenate([sh0, shN], axis=1)
+
+    device = "cuda"
+
+    def create_attribute(
+        name: str, data: NDArray, remap_method: Literal["exp", "sigmoid"] | None = None
+    ) -> NamedAttribute:
+        packed_tensor = torch.from_numpy(data).to(device)
+        if remap_method:
+            config = AttributeDecodingParams(remapping=RemappingDecodingParams(method=remap_method))
+        else:
+            config = AttributeDecodingParams()
+        return NamedAttribute(name=name, packed_data=packed_tensor, decoding_params=config)
+
+    return Gaussians(
+        means_attr=create_attribute("means", means),
+        quaternions_attr=create_attribute("quaternions", quats),
+        scales_attr=create_attribute("scales", scales, remap_method="exp"),
+        opacities_attr=create_attribute("opacities", opacities, remap_method="sigmoid"),
+        sh_attr=create_attribute("sh", sh_combined),
     )
 
 
@@ -66,15 +88,25 @@ def save_ply(gaussians: Gaussians, path: Path) -> None:
         gaussians: Gaussians instance to save
         path: Path where to save the PLY file
     """
-    # Convert tensors to numpy arrays individually
-    means = gaussians.means_attr.raw_data.cpu().numpy()
-    quats = gaussians.quaternions_attr.raw_data.cpu().numpy()
-    # For scales and opacities, we need to invert the transformations
-    scales = torch.log(gaussians.scales_attr.raw_data).cpu().numpy()
-    opacities = torch.logit(gaussians.opacities_attr.raw_data).cpu().numpy()
+
+    def get_packed_data(attr: NamedAttribute) -> Tensor:
+        if attr.packed_data is None:
+            if attr.scene_params is None:
+                raise ValueError(f"Neither packed_data nor scene_params available for {attr.name}")
+            # Encode scene_params to get packed_data
+            attr.encode(None)
+            if attr.packed_data is None:
+                raise ValueError(f"Failed to encode scene_params for {attr.name}")
+        return attr.packed_data
+
+    # Get packed (encoded) data - this is already in log/logit space where needed
+    means = get_packed_data(gaussians.means_attr).cpu().numpy()
+    quats = get_packed_data(gaussians.quaternions_attr).cpu().numpy()
+    scales = get_packed_data(gaussians.scales_attr).cpu().numpy()
+    opacities = get_packed_data(gaussians.opacities_attr).cpu().numpy()
 
     # Handle spherical harmonics
-    sh_data = gaussians.sh_attr.raw_data.cpu().numpy()
+    sh_data = get_packed_data(gaussians.sh_attr).cpu().numpy()
     sh0 = sh_data[:, :1, :]  # (N, 1, 3)
     shN = sh_data[:, 1:, :]  # (N, S, 3)
 

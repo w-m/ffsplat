@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Generic, Literal, TypeVar
+from dataclasses import dataclass, field
+from typing import Any, Generic, Literal, Self, TypeVar
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
 E = TypeVar("E")  # encoding config type
 D = TypeVar("D")  # decoding params type
 
 
-class EncodingTransform(Generic[E, D], nn.Module):
+class EncodingTransform(Generic[E, D]):
     """
     Base class that can be initialized with encoding_config or decoding_params.
     Subclasses define encode/decode logic. This class provides easy getters and
@@ -54,7 +53,7 @@ class EncodingTransform(Generic[E, D], nn.Module):
             raise ValueError("No decoding_params set; cannot decode.")
         return self._decode_impl(data, self.decoding_params)
 
-    def to(self, device: torch.device) -> EncodingTransform[E, D]:
+    def to(self, device: torch.device) -> Self:
         """Move all dependent tensors to the specified device."""
         return self
 
@@ -71,7 +70,7 @@ class EncodingTransform(Generic[E, D], nn.Module):
 class QuantizationEncodingConfig:
     num_bits: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.num_bits <= 0:
             raise ValueError("num_bits must be positive")
 
@@ -79,7 +78,8 @@ class QuantizationEncodingConfig:
 class QuantizationTransform(EncodingTransform[QuantizationEncodingConfig, None]):
     def _encode_impl(self, data: Tensor, config: QuantizationEncodingConfig) -> Tensor:
         levels = 2**config.num_bits - 1
-        return torch.round(data * levels) / levels
+        rounded: Tensor = torch.round(data * levels) / levels
+        return rounded
 
 
 @dataclass
@@ -159,7 +159,7 @@ class RescalingTransform(EncodingTransform[RescalingEncodingConfig, RescalingDec
 class BitShiftEncodingConfig:
     right_shift: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.right_shift < 0:
             raise ValueError("right_shift must be positive")
 
@@ -168,7 +168,7 @@ class BitShiftEncodingConfig:
 class BitShiftDecodingParams:
     left_shift: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.left_shift < 0:
             raise ValueError("left_shift must be positive")
 
@@ -226,7 +226,7 @@ class RemappingDecodingParams:
 
 class RemappingTransform(EncodingTransform[RemappingEncodingConfig, RemappingDecodingParams]):
     def _encode_impl(self, data: Tensor, config: RemappingEncodingConfig) -> Tensor:
-        match self.method:
+        match config.method:
             case "exp":
                 return torch.log(data)
             case "sigmoid":
@@ -278,7 +278,7 @@ class CodebookTransform(EncodingTransform[CodebookLookupEncodingConfig, Codebook
         raise NotImplementedError
         return params.codebook()[data]
 
-    def to(self, device: torch.device) -> CodebookTransform:
+    def to(self, device: torch.device) -> Self:
         if self._decoding_params:
             codebook = self._decoding_params.codebook.to(device)
         raise NotImplementedError
@@ -307,7 +307,7 @@ class SplitTransform(EncodingTransform[SplitEncodingConfig, SplitDecodingParams]
             raise ValueError(
                 f"Split size {split_size} does not divide the input shape {data.shape} along dimension {split_dim}"
             )
-        chunks_t = data.split(split_size, dim=split_dim)
+        # chunks_t = data.split(split_size, dim=split_dim)
         # build list of NamedAttributes
         # TODO
         raise NotImplementedError
@@ -354,22 +354,22 @@ class AttributeEncodingConfig:
 
 @dataclass
 class AttributeDecodingParams:
-    coding: dict[str, Any]
-    reshaping: None
-    trimming: None
-    coding_dtype: None
-    quantization: None
-    bit_shift: BitShiftDecodingParams | None
-    codebook: CodebookLookupDecodingParams | None
-    split: SplitDecodingParams | None
-    logical_or: None
-    combined_dtype: DTypeDecodingParams | None
-    rescaling: RescalingDecodingParams | None
-    clamping: None
-    remapping: RemappingDecodingParams | None
+    coding: dict[str, Any] = field(default_factory=dict)
+    reshaping: None = None
+    trimming: None = None
+    coding_dtype: None = None
+    quantization: None = None
+    bit_shift: BitShiftDecodingParams | None = None
+    codebook: CodebookLookupDecodingParams | None = None
+    split: SplitDecodingParams | None = None
+    logical_or: None = None
+    combined_dtype: DTypeDecodingParams | None = None
+    rescaling: RescalingDecodingParams | None = None
+    clamping: None = None
+    remapping: RemappingDecodingParams | None = None
 
 
-class NamedAttribute(nn.Module):
+class NamedAttribute:
     name: str
 
     # the underlying data, that can be stored in a buffer (e.g JPEG)
@@ -394,19 +394,19 @@ class NamedAttribute(nn.Module):
     # clamping: ClampingTransform | None
     # remapping: RemappingTransform | None
 
-    coding: EncodingTransform | None
-    reshaping: EncodingTransform | None
-    trimming: EncodingTransform | None
-    coding_dtype: EncodingTransform | None
-    quantization: EncodingTransform | None
-    bit_shift: EncodingTransform | None
-    codebook: EncodingTransform | None
-    split: EncodingTransform | None
-    logical_or: EncodingTransform | None
-    combined_dtype: EncodingTransform | None
-    rescaling: EncodingTransform | None
-    clamping: EncodingTransform | None
-    remapping: EncodingTransform | None
+    coding: EncodingTransform | None = None
+    reshaping: EncodingTransform | None = None
+    trimming: EncodingTransform | None = None
+    coding_dtype: EncodingTransform | None = None
+    quantization: EncodingTransform | None = None
+    bit_shift: EncodingTransform | None = None
+    codebook: EncodingTransform | None = None
+    split: EncodingTransform | None = None
+    logical_or: EncodingTransform | None = None
+    combined_dtype: EncodingTransform | None = None
+    rescaling: EncodingTransform | None = None
+    clamping: EncodingTransform | None = None
+    remapping: EncodingTransform | None = None
 
     def __init__(
         self,
@@ -425,24 +425,25 @@ class NamedAttribute(nn.Module):
         if not encoding_config and not decoding_params:
             raise ValueError("Provide either encoding_config OR decoding_params.")
 
-        if encoding_config and not scene_params:
+        if encoding_config and scene_params is None:
             raise ValueError("Provide scene_params when using encoding_config.")
 
-        if decoding_params and not packed_data:
+        if decoding_params and packed_data is None:
             raise ValueError("Provide packed_data when using decoding_params.")
 
         self.name = name
 
-        # Register buffers for data
         if scene_params is not None:
-            self.register_buffer("scene_params", scene_params)
+            self.scene_params = scene_params
         if packed_data is not None:
-            self.register_buffer("packed_data", packed_data)
+            self.packed_data = packed_data
 
         # Initialize transforms for encoding path
         if encoding_config:
-            self.coding = EncodingTransform.from_encoding_config(encoding_config.coding)
-            self.reshaping = SquareGridTransform() if encoding_config.reshaping is not None else None
+            self.coding = (
+                EncodingTransform.from_encoding_config(encoding_config.coding) if encoding_config.coding else None
+            )
+            self.reshaping = SquareGridTransform() if encoding_config.reshaping else None
             self.trimming = (
                 TrimmingTransform.from_encoding_config(encoding_config.trimming) if encoding_config.trimming else None
             )
@@ -463,7 +464,7 @@ class NamedAttribute(nn.Module):
                 CodebookTransform.from_encoding_config(encoding_config.codebook) if encoding_config.codebook else None
             )
             self.split = SplitTransform.from_encoding_config(encoding_config.split) if encoding_config.split else None
-            self.logical_or = LogicalOrTransform() if encoding_config.logical_or is not None else None
+            self.logical_or = LogicalOrTransform() if encoding_config.logical_or else None
             self.combined_dtype = (
                 DTypeTransform.from_encoding_config(encoding_config.combined_dtype)
                 if encoding_config.combined_dtype
@@ -485,8 +486,10 @@ class NamedAttribute(nn.Module):
 
         # Initialize transforms for decoding path
         elif decoding_params:
-            self.coding = EncodingTransform.from_decoding_params(decoding_params.coding)
-            self.reshaping = SquareGridTransform() if decoding_params.reshaping is not None else None
+            self.coding = (
+                EncodingTransform.from_decoding_params(decoding_params.coding) if decoding_params.coding else None
+            )
+            self.reshaping = SquareGridTransform() if decoding_params.reshaping else None
             self.trimming = None  # Trimming is encode-only
             self.coding_dtype = None  # No params needed for decode
             self.quantization = None  # Quantization is encode-only
@@ -497,7 +500,7 @@ class NamedAttribute(nn.Module):
                 CodebookTransform.from_decoding_params(decoding_params.codebook) if decoding_params.codebook else None
             )
             self.split = SplitTransform.from_decoding_params(decoding_params.split) if decoding_params.split else None
-            self.logical_or = LogicalOrTransform() if decoding_params.logical_or is not None else None
+            self.logical_or = LogicalOrTransform() if decoding_params.logical_or else None
             self.combined_dtype = (
                 DTypeTransform.from_decoding_params(decoding_params.combined_dtype)
                 if decoding_params.combined_dtype
@@ -515,23 +518,25 @@ class NamedAttribute(nn.Module):
                 else None
             )
 
-        # Create ordered list of transforms for encode/decode
         self._transforms = [
-            self.remapping,
-            self.clamping,
-            self.rescaling,
-            self.combined_dtype,
-            self.logical_or,
-            self.split,
-            self.codebook,
-            self.bit_shift,
-            self.quantization,
-            self.coding_dtype,
-            self.trimming,
-            self.reshaping,
-            self.coding,
+            t
+            for t in [
+                self.remapping,
+                self.clamping,
+                self.rescaling,
+                self.combined_dtype,
+                self.logical_or,
+                self.split,
+                self.codebook,
+                self.bit_shift,
+                self.quantization,
+                self.coding_dtype,
+                self.trimming,
+                self.reshaping,
+                self.coding,
+            ]
+            if t is not None
         ]
-        self._transforms = [t for t in self._transforms if t is not None]
 
     @property
     def device(self) -> torch.device:
@@ -557,7 +562,7 @@ class NamedAttribute(nn.Module):
                 transform.to(device)
         return self
 
-    def encode(self, context: Mapping[str, Tensor | NamedAttribute] | None = None) -> Tensor:
+    def encode(self) -> Tensor:
         """Apply the encoding pipeline to scene_params to produce packed_data."""
         if not hasattr(self, "scene_params") or self.scene_params is None:
             raise ValueError("No scene_params available for encoding")
@@ -569,8 +574,9 @@ class NamedAttribute(nn.Module):
         self.packed_data = data
         return data
 
-    def decode(self, context: Mapping[str, Tensor | NamedAttribute] | None = None) -> Tensor:
+    def decode(self) -> Tensor:
         """Apply the decoding pipeline to packed_data to reconstruct scene_params."""
+
         if not hasattr(self, "packed_data") or self.packed_data is None:
             raise ValueError("No packed_data available for decoding")
 

@@ -50,6 +50,20 @@ def render_fn(
     return render_rgbs
 
 
+# Create render function with bound parameters
+def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
+    return render_fn(
+        gaussians.means_attr.decode(),
+        gaussians.quaternions_attr.decode(),
+        gaussians.scales_attr.decode(),
+        gaussians.opacities_attr.decode(),
+        gaussians.sh_attr.decode(),
+        gaussians.sh_degree,
+        camera_state,
+        img_wh,
+    )
+
+
 if __name__ == "__main__":
     parser = ArgumentParser(description="Interactive compression tool parameters")
     parser.add_argument("--data_path", type=str)
@@ -57,10 +71,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     gaussians = load_ply(args.data_path).to("cuda")
-
-    # Create render function with bound parameters
-    def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
-        return render_fn(gaussians.means_attr, quats_t, scales_t, opacities_t, colors, sh_degree, camera_state, img_wh)
 
     server = viser.ViserServer(verbose=False)
     viewer = Viewer(server=server, render_fn=bound_render_fn, mode="rendering")
