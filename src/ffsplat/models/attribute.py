@@ -300,9 +300,9 @@ class NamedAttribute:
         """Move all data and transforms to the specified device."""
         device = torch.device(device)  # Convert string to device if needed
 
-        if hasattr(self, "scene_params") and self._scene_params is not None:
+        if self._scene_params is not None:
             self._scene_params = self._scene_params.to(device)
-        if hasattr(self, "packed_data") and self._packed_data is not None:
+        if self._packed_data is not None:
             self._packed_data = self._packed_data.to(device)
 
         # Move all transforms that need device movement
