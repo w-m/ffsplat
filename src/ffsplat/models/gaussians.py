@@ -39,11 +39,11 @@ class Gaussians:
     @property
     def sh_degree(self) -> int:
         """Calculate spherical harmonics degree from the data shape."""
-        if self.sh_attr.scene_params is None and self.sh_attr.packed_data is None:
+        if self.sh_attr._scene_params is None and self.sh_attr._packed_data is None:
             raise ValueError("Neither scene_params nor packed_data available")
 
         # Use whichever data is available
-        data = self.sh_attr.scene_params if self.sh_attr.scene_params is not None else self.sh_attr.packed_data
+        data = self.sh_attr._scene_params if self.sh_attr._scene_params is not None else self.sh_attr._packed_data
         if data is None:  # Purely for type checking - we know this can't happen
             raise ValueError("Internal error: data is None despite prior check")
 

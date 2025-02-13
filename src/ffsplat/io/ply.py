@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 from plyfile import PlyData, PlyElement
-from torch import Tensor
 
 from ..models.attribute import (
     AttributeDecodingParams,
@@ -89,24 +88,13 @@ def save_ply(gaussians: Gaussians, path: Path) -> None:
         path: Path where to save the PLY file
     """
 
-    def get_packed_data(attr: NamedAttribute) -> Tensor:
-        if attr.packed_data is None:
-            if attr.scene_params is None:
-                raise ValueError(f"Neither packed_data nor scene_params available for {attr.name}")
-            # Encode scene_params to get packed_data
-            attr.encode(None)
-            if attr.packed_data is None:
-                raise ValueError(f"Failed to encode scene_params for {attr.name}")
-        return attr.packed_data
-
-    # Get packed (encoded) data - this is already in log/logit space where needed
-    means = get_packed_data(gaussians.means_attr).cpu().numpy()
-    quats = get_packed_data(gaussians.quaternions_attr).cpu().numpy()
-    scales = get_packed_data(gaussians.scales_attr).cpu().numpy()
-    opacities = get_packed_data(gaussians.opacities_attr).cpu().numpy()
+    means = gaussians.means_attr.packed_data.cpu().numpy()
+    quats = gaussians.quaternions_attr.packed_data.cpu().numpy()
+    scales = gaussians.scales_attr.packed_data.cpu().numpy()
+    opacities = gaussians.opacities_attr.packed_data.cpu().numpy()
 
     # Handle spherical harmonics
-    sh_data = get_packed_data(gaussians.sh_attr).cpu().numpy()
+    sh_data = gaussians.sh_attr.packed_data.cpu().numpy()
     sh0 = sh_data[:, :1, :]  # (N, 1, 3)
     shN = sh_data[:, 1:, :]  # (N, S, 3)
 

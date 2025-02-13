@@ -373,9 +373,9 @@ class NamedAttribute:
     name: str
 
     # the underlying data, that can be stored in a buffer (e.g JPEG)
-    packed_data: Tensor | None
+    _packed_data: Tensor | None
     # the parameters that are used to render the scene (e.g. linear scale values)
-    scene_params: Tensor | None
+    _scene_params: Tensor | None
 
     # packed_data --> decode --> scene_params
     # scene_params --> encode --> packed_data
@@ -434,9 +434,9 @@ class NamedAttribute:
         self.name = name
 
         if scene_params is not None:
-            self.scene_params = scene_params
+            self._scene_params = scene_params
         if packed_data is not None:
-            self.packed_data = packed_data
+            self._packed_data = packed_data
 
         # Initialize transforms for encoding path
         if encoding_config:
@@ -541,20 +541,34 @@ class NamedAttribute:
     @property
     def device(self) -> torch.device:
         """Get the device of the data. Prefer scene_params if available."""
-        if hasattr(self, "scene_params") and self.scene_params is not None:
-            return self.scene_params.device
-        if hasattr(self, "packed_data") and self.packed_data is not None:
-            return self.packed_data.device
+        if hasattr(self, "scene_params") and self._scene_params is not None:
+            return self._scene_params.device
+        if hasattr(self, "packed_data") and self._packed_data is not None:
+            return self._packed_data.device
         raise ValueError("No data available to determine device")
+
+    @property
+    def scene_params(self) -> Tensor:
+        """Get the scene parameters tensor."""
+        if self._scene_params is None:
+            raise ValueError("No scene_params available. Run decode()?")
+        return self._scene_params
+
+    @property
+    def packed_data(self) -> Tensor:
+        """Get the packed data tensor."""
+        if self._packed_data is None:
+            raise ValueError("No packed_data available. Run encode()?")
+        return self._packed_data
 
     def to(self, device: torch.device | str) -> NamedAttribute:
         """Move all data and transforms to the specified device."""
         device = torch.device(device)  # Convert string to device if needed
 
-        if hasattr(self, "scene_params") and self.scene_params is not None:
-            self.scene_params = self.scene_params.to(device)
-        if hasattr(self, "packed_data") and self.packed_data is not None:
-            self.packed_data = self.packed_data.to(device)
+        if hasattr(self, "scene_params") and self._scene_params is not None:
+            self._scene_params = self._scene_params.to(device)
+        if hasattr(self, "packed_data") and self._packed_data is not None:
+            self._packed_data = self._packed_data.to(device)
 
         # Move all transforms that need device movement
         for transform in [self.coding, self.codebook, self.split]:
@@ -564,25 +578,25 @@ class NamedAttribute:
 
     def encode(self) -> Tensor:
         """Apply the encoding pipeline to scene_params to produce packed_data."""
-        if not hasattr(self, "scene_params") or self.scene_params is None:
+        if not hasattr(self, "scene_params") or self._scene_params is None:
             raise ValueError("No scene_params available for encoding")
 
-        data = self.scene_params
+        data = self._scene_params
         for transform in self._transforms:
             data = transform.encode(data)
 
-        self.packed_data = data
+        self._packed_data = data
         return data
 
     def decode(self) -> Tensor:
         """Apply the decoding pipeline to packed_data to reconstruct scene_params."""
 
-        if not hasattr(self, "packed_data") or self.packed_data is None:
+        if not hasattr(self, "packed_data") or self._packed_data is None:
             raise ValueError("No packed_data available for decoding")
 
-        data = self.packed_data
+        data = self._packed_data
         for transform in reversed(self._transforms):
             data = transform.decode(data)
 
-        self.scene_params = data
+        self._scene_params = data
         return data
