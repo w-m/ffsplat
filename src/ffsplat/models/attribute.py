@@ -77,9 +77,9 @@ class NamedAttribute:
     name: str
 
     # the underlying data, that can be stored in a buffer (e.g JPEG)
-    _packed_data: Tensor | None
+    _packed_data: Tensor | None = None
     # the parameters that are used to render the scene (e.g. linear scale values)
-    _scene_params: Tensor | None
+    _scene_params: Tensor | None = None
 
     # packed_data --> decode --> scene_params
     # scene_params --> encode --> packed_data
@@ -242,14 +242,45 @@ class NamedAttribute:
             if t is not None
         ]
 
+    def __str__(self, num_gaussians: int | None = None) -> str:
+        """Return a compact string representation of the attribute."""
+
+        def format_shape(shape: tuple) -> str:
+            dims = []
+            for d in shape:
+                if num_gaussians is not None and d == num_gaussians:
+                    dims.append("N")
+                else:
+                    dims.append(str(d))
+            return ", ".join(dims)
+
+        scene = (
+            f"scene=({format_shape(self._scene_params.shape)}) [{self._scene_params.min():.3g}, {self._scene_params.max():.3g}]"
+            if self._scene_params is not None
+            else "scene="
+        )
+        packed = (
+            f"packed=({format_shape(self._packed_data.shape)}) [{self._packed_data.min():.3g}, {self._packed_data.max():.3g}]"
+            if self._packed_data is not None
+            else "packed="
+        )
+        return f"{self.name:{11}s}: {packed}, {scene}"
+
     @property
     def device(self) -> torch.device:
         """Get the device of the data. Prefer scene_params if available."""
-        if hasattr(self, "scene_params") and self._scene_params is not None:
+        if self._scene_params is not None:
             return self._scene_params.device
-        if hasattr(self, "packed_data") and self._packed_data is not None:
+        if self._packed_data is not None:
             return self._packed_data.device
         raise ValueError("No data available to determine device")
+
+    @property
+    def num_gaussians(self) -> int:
+        """Get the number of gaussians from scene_params first dimension."""
+        if self._scene_params is None:
+            raise ValueError("Cannot determine number of gaussians without scene_params")
+        return self._scene_params.shape[0]
 
     @property
     def scene_params(self) -> Tensor:

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, Self, TypeVar, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Generic, Literal, Self, TypeVar
 
 if TYPE_CHECKING:
     from .attribute import NamedAttribute
 
-import numpy as np
 import torch
-from numpy.typing import NDArray
 from torch import Tensor
 
 E = TypeVar("E")  # encoding config type
@@ -265,12 +263,12 @@ class SquareGridTransform(EncodingTransform[None, None]):
 
 @dataclass
 class CodebookLookupEncodingConfig:
-    codebook: "NamedAttribute"
+    codebook: NamedAttribute
 
 
 @dataclass
 class CodebookLookupDecodingParams:
-    codebook: "NamedAttribute"
+    codebook: NamedAttribute
 
 
 class CodebookTransform(EncodingTransform[CodebookLookupEncodingConfig, CodebookLookupDecodingParams]):

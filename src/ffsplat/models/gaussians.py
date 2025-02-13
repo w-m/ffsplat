@@ -24,6 +24,11 @@ class Gaussians:
     sh_attr: NamedAttribute  # Combined spherical harmonics (sh0 and shN)
 
     @property
+    def num_gaussians(self) -> int:
+        """Get the number of gaussians from means attribute."""
+        return self.means_attr.num_gaussians
+
+    @property
     def device(self) -> torch.device:
         return self.means_attr.device
 
@@ -35,6 +40,22 @@ class Gaussians:
         self.opacities_attr.to(device)
         self.sh_attr.to(device)
         return self
+
+    def __str__(self) -> str:
+        """Return a compact string representation of the Gaussians."""
+        try:
+            N = self.num_gaussians
+            n_display = f"{N:,}"
+        except ValueError:
+            N = None
+            n_display = "?"
+
+        attrs = [
+            attr.__str__(N)
+            for attr in [self.means_attr, self.quaternions_attr, self.scales_attr, self.opacities_attr, self.sh_attr]
+        ]
+
+        return f"Gaussians(N={n_display}, device={self.device})\n  " + "\n  ".join(attrs)
 
     @property
     def sh_degree(self) -> int:
@@ -50,6 +71,14 @@ class Gaussians:
         # Data shape is (N, num_coeffs, 3), where num_coeffs = (degree + 1)^2
         # So num_coeffs = shape[1], and we solve for degree
         return int(np.sqrt(data.shape[1]) - 1)
+
+    def decode(self) -> None:
+        """Decode all attributes."""
+        self.means_attr.decode()
+        self.quaternions_attr.decode()
+        self.scales_attr.decode()
+        self.opacities_attr.decode()
+        self.sh_attr.decode()
 
     @classmethod
     def from_numpy(
