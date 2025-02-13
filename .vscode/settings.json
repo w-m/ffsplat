@@ -10,5 +10,6 @@
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
-    "ruff.configuration": "${workspaceFolder}/.vscode/ruff.toml"
+    "ruff.configuration": "${workspaceFolder}/.vscode/ruff.toml",
+    "makefile.configureOnOpen": false
 }
