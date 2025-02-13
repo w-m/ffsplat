@@ -54,22 +54,12 @@ class BlenderParser(DataParser):
         if len(self.image_names) == 0:
             raise ValueError("No images found.")
 
-        # 3D points
-        points = None
-        points_err = None
-        points_rgb = None
-        point_indices = {}
-
         # Normalize the world space.
         if normalize_data:
             self.camtoworlds, transform = normalize(self.camtoworlds)
         else:
             transform = np.eye(4)
 
-        self.points = points  # np.ndarray, (num_points, 3)
-        self.points_err = points_err  # np.ndarray, (num_points,)
-        self.points_rgb = points_rgb  # np.ndarray, (num_points, 3)
-        self.point_indices = point_indices  # Dict[str, np.ndarray], image_name -> [M,]
         self.transform = transform  # np.ndarray, (4, 4)
 
         # size of the scene measured by cameras

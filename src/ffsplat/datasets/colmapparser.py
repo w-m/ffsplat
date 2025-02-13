@@ -65,7 +65,6 @@ class ColmapParser(DataParser):
         manager = SceneManager(colmap_dir)
         manager.load_cameras()
         manager.load_images()
-        manager.load_points3D()
 
         # Extract extrinsic matrices in world-to-camera format.
         imdata = manager.images
@@ -162,11 +161,8 @@ class ColmapParser(DataParser):
 
         self.factor = factor
 
-        # 3D points and {image_name -> [point_idx]}
-        points, points_err, points_rgb, point_indices = self._load_points(manager)
-
         # Normalize the world space.
-        self._normalize(camtoworlds, points)
+        self._normalize(camtoworlds)
 
         self.image_names = image_names  # List[str], (num_images,)
         self.image_paths = image_paths  # List[str], (num_images,)
@@ -175,9 +171,6 @@ class ColmapParser(DataParser):
         self.params_dict = params_dict  # Dict of camera_id -> params
         self.imsize_dict = imsize_dict  # Dict of camera_id -> (width, height)
         self.mask_dict = mask_dict  # Dict of camera_id -> mask
-        self.points_err = points_err  # np.ndarray, (num_points,)
-        self.points_rgb = points_rgb  # np.ndarray, (num_points, 3)
-        self.point_indices = point_indices  # Dict[str, np.ndarray], image_name -> [M,]
 
         colmap_width, colmap_height = self.imsize_dict[self.camera_ids[0]]
         s_height, s_width = actual_height / colmap_height, actual_width / colmap_width
@@ -280,26 +273,10 @@ class ColmapParser(DataParser):
             print("Warning: COLMAP Camera is not PINHOLE. Images have distortion.")
         return params, camtype
 
-    def _load_points(self, manager):
-        points = manager.points3D.astype(np.float32)
-        points_err = manager.point3D_errors.astype(np.float32)
-        points_rgb = manager.point3D_colors.astype(np.uint8)
-        point_indices = {}
-
-        image_id_to_name = {v: k for k, v in manager.name_to_image_id.items()}
-        for point_id, data in manager.point3D_id_to_images.items():
-            for image_id, _ in data:
-                image_name = image_id_to_name[image_id]
-                point_idx = manager.point3D_id_to_point3D_idx[point_id]
-                point_indices.setdefault(image_name, []).append(point_idx)
-        point_indices = {k: np.array(v).astype(np.int32) for k, v in point_indices.items()}
-        return points, points_err, points_rgb, point_indices
-
-    def _normalize(self, camtoworlds, points):
+    def _normalize(self, camtoworlds):
         if self.normalize_data:
-            camtoworlds, points, transform = normalize(camtoworlds, points)
+            camtoworlds, transform = normalize(camtoworlds)
         else:
             transform = np.eye(4)
         self.transform = transform  # np.ndarray, (4, 4)
-        self.points = points  # np.ndarray, (num_points, 3)
         self.camtoworlds = camtoworlds  # np.ndarray, (num_images, 4, 4)
