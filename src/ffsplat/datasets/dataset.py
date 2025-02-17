@@ -23,12 +23,15 @@ class Dataset:
                 self.indices = self.parser.train_indices
             else:
                 self.indices = self.parser.test_indices
+            # TODO: correct this and add in eval.py
+            self.white_background = True
         elif parser.type == "colmap":
             indices = np.arange(len(self.parser.image_names))
             if split == "train":
                 self.indices = indices[indices % self.parser.test_every != 0]
             else:
                 self.indices = indices[indices % self.parser.test_every == 0]
+            self.white_background = False
 
     def __len__(self):
         return len(self.indices)

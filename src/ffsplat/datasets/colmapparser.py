@@ -55,6 +55,7 @@ class ColmapParser(DataParser):
         self.data_dir = data_dir
         self.normalize_data = normalize_data
         self.test_every = test_every
+        self.type = "colmap"
 
         colmap_dir = os.path.join(data_dir, "sparse/0/")
         if not os.path.exists(colmap_dir):

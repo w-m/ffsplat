@@ -26,6 +26,7 @@ class BlenderParser(DataParser):
     ):
         self.data_dir = data_dir
         self.normalize_data = normalize_data
+        self.type = "blender"
 
         # Load camera-to-world matrices.
         self.image_names: list[str] = []  # (num_images,)
