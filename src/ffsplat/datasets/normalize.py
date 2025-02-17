@@ -75,7 +75,7 @@ def transform_cameras(matrix, camtoworlds):
     """
     if matrix.shape != (4, 4):
         raise ValueError(f"transformation matrix has shape {matrix.shape} instead of (4, 4)")
-    if len(camtoworlds.shape) == 3 and camtoworlds.shape[1:] == (4, 4):
+    if len(camtoworlds.shape) != 3 or camtoworlds.shape[1:] != (4, 4):
         raise ValueError(f"camtoworlds has shape {camtoworlds.shape} instead of (N, 4, 4)")
     camtoworlds = np.einsum("nij, ki -> nkj", camtoworlds, matrix)
     scaling = np.linalg.norm(camtoworlds[:, 0, :3], axis=1)
