@@ -5,10 +5,11 @@ import numpy as np
 import torch
 from jaxtyping import Float
 from numpy.typing import NDArray
+from torch import Tensor
 
-from .attribute import (
-    AttributeEncodingConfig,
-    NamedAttribute,
+from .field import (
+    FieldEncodingConfig,
+    NamedField,
     RemappingEncodingConfig,
 )
 
@@ -17,22 +18,24 @@ from .attribute import (
 class GaussiansEncodingConfig:
     """Holds encoding configurations for all attributes of a Gaussians instance"""
 
-    means: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
-    quaternions: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
-    scales: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
-    opacities: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
-    sh: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
+    means: FieldEncodingConfig = field(default_factory=FieldEncodingConfig)
+    quaternions: FieldEncodingConfig = field(default_factory=FieldEncodingConfig)
+    scales: FieldEncodingConfig = field(default_factory=FieldEncodingConfig)
+    opacities: FieldEncodingConfig = field(default_factory=FieldEncodingConfig)
+    sh: FieldEncodingConfig = field(default_factory=FieldEncodingConfig)
+    # TODO how to deal with dynamic field names?
+    # __dict__: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Gaussians:
     """Collection of 3D Gaussians with their attributes stored as torch tensors"""
 
-    means_attr: NamedAttribute
-    quaternions_attr: NamedAttribute
-    scales_attr: NamedAttribute
-    opacities_attr: NamedAttribute
-    sh_attr: NamedAttribute  # Combined spherical harmonics (sh0 and shN)
+    means_attr: NamedField
+    quaternions_attr: NamedField
+    scales_attr: NamedField
+    opacities_attr: NamedField
+    sh_attr: NamedField  # Combined spherical harmonics (sh0 and shN)
 
     @property
     def num_gaussians(self) -> int:
@@ -117,11 +120,11 @@ class Gaussians:
 
         def create_attribute(
             name: str, data: NDArray, remap_method: Literal["exp", "sigmoid"] | None = None
-        ) -> NamedAttribute:
+        ) -> NamedField:
             tensor = torch.from_numpy(data).to(device)
             config = None
             if remap_method:
-                config = AttributeEncodingConfig(
+                config = FieldEncodingConfig(
                     coding={},  # No coding by default
                     reshaping=None,
                     trimming=None,
@@ -136,7 +139,7 @@ class Gaussians:
                     clamping=None,
                     remapping=RemappingEncodingConfig(method=remap_method),
                 )
-            return NamedAttribute(name=name, scene_params=tensor, encoding_config=config)
+            return NamedField(name=name, scene_params=tensor, encoding_config=config)
 
         return cls(
             means_attr=create_attribute("means", means),
@@ -147,26 +150,35 @@ class Gaussians:
         )
 
     @classmethod
-    def from_gaussians(cls, other: "Gaussians", encoding_config: GaussiansEncodingConfig) -> "Gaussians":
+    def from_gaussians(cls, other: "Gaussians", encoding_config: dict) -> "Gaussians":
         """Create a new Gaussians instance from another, applying the specified encoding configs."""
         return cls(
-            means_attr=NamedAttribute(
-                name="means", scene_params=other.means_attr.scene_params, encoding_config=encoding_config.means
+            means_attr=NamedField(
+                name="means", scene_params=other.means_attr.scene_params, encoding_config=encoding_config["means"]
             ),
-            quaternions_attr=NamedAttribute(
+            quaternions_attr=NamedField(
                 name="quaternions",
                 scene_params=other.quaternions_attr.scene_params,
-                encoding_config=encoding_config.quaternions,
+                encoding_config=encoding_config["quaternions"],
             ),
-            scales_attr=NamedAttribute(
-                name="scales", scene_params=other.scales_attr.scene_params, encoding_config=encoding_config.scales
+            scales_attr=NamedField(
+                name="scales", scene_params=other.scales_attr.scene_params, encoding_config=encoding_config["scales"]
             ),
-            opacities_attr=NamedAttribute(
+            opacities_attr=NamedField(
                 name="opacities",
                 scene_params=other.opacities_attr.scene_params,
-                encoding_config=encoding_config.opacities,
+                encoding_config=encoding_config["opacities"],
             ),
-            sh_attr=NamedAttribute(
-                name="sh", scene_params=other.sh_attr.scene_params, encoding_config=encoding_config.sh
+            sh_attr=NamedField(
+                name="sh", scene_params=other.sh_attr.scene_params, encoding_config=encoding_config["sh"]
             ),
         )
+
+
+@dataclass
+class GaussianSceneParams:
+    means: Float[Tensor, "N 3"]
+    quaternions: Float[Tensor, "N 4"]
+    scales: Float[Tensor, "N 3"]
+    opacities: Float[Tensor, " N"]
+    sh: Float[Tensor, "N S 3"]

@@ -5,12 +5,50 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
 
 if TYPE_CHECKING:
-    from .attribute import NamedAttribute
+    from .field import NamedField
 
 import torch
 from torch import Tensor
 
 from .encoding_transform import EncodingTransform
+
+
+@dataclass
+class EncoderStore(EncodingTransform[None, None]):
+    data: Tensor | None = None
+
+    def _encode_impl(self, data: Tensor, config: None) -> Tensor:
+        self.data = data
+        return data
+
+    def _decode_impl(self, data: Tensor, params: None) -> Tensor:
+        if self.data is None:
+            raise ValueError("No data stored in EncoderStore")
+        return self.data
+
+    def to(self, device: torch.device) -> Self:
+        if self.data is not None:
+            self.data = self.data.to(device)
+        return self
+
+
+@dataclass
+class DecoderStore(EncodingTransform[None, None]):
+    data: Tensor | None = None
+
+    def _encode_impl(self, data: Tensor, config: None) -> Tensor:
+        if self.data is None:
+            raise ValueError("No data stored in DecoderStore")
+        return self.data
+
+    def _decode_impl(self, data: Tensor, params: None) -> Tensor:
+        self.data = data
+        return data
+
+    def to(self, device: torch.device) -> Self:
+        if self.data is not None:
+            self.data = self.data.to(device)
+        return self
 
 
 @dataclass
@@ -207,12 +245,12 @@ class SquareGridTransform(EncodingTransform[None, None]):
 
 @dataclass
 class CodebookLookupEncodingConfig:
-    codebook: NamedAttribute
+    codebook: NamedField
 
 
 @dataclass
 class CodebookLookupDecodingParams:
-    codebook: NamedAttribute
+    codebook: NamedField
 
 
 class CodebookTransform(EncodingTransform[CodebookLookupEncodingConfig, CodebookLookupDecodingParams]):
@@ -237,27 +275,33 @@ class CodebookTransform(EncodingTransform[CodebookLookupEncodingConfig, Codebook
 @dataclass
 class SplitEncodingConfig:
     split_dim: int
-    split_size: int
+    split_size_or_sections: int | list[int]
+    chunk_name_prefix_or_list: str | list[str]
 
 
 @dataclass
 class SplitDecodingParams:
     concat_dim: int
-    attributes: list[NamedAttribute]
+    attributes: list[NamedField]
 
 
 class SplitTransform(EncodingTransform[SplitEncodingConfig, SplitDecodingParams]):
-    def _encode_impl(self, data: Tensor, config: SplitEncodingConfig) -> Tensor:
+    def _encode_impl(self, data: Tensor, config: SplitEncodingConfig) -> dict[str, Tensor]:
         split_dim = config.split_dim
-        split_size = config.split_size
-        if data.shape[split_dim] % split_size != 0:
-            raise ValueError(
-                f"Split size {split_size} does not divide the input shape {data.shape} along dimension {split_dim}"
-            )
-        # chunks_t = data.split(split_size, dim=split_dim)
-        # build list of NamedAttributes
-        # TODO
-        raise NotImplementedError
+        split_size_or_sections = config.split_size_or_sections
+        chunks_t = torch.split(data, split_size_or_sections, dim=split_dim)
+
+        match config.chunk_name_prefix_or_list:
+            case str():
+                chunk_names = [f"{config.chunk_name_prefix_or_list}_{i}" for i in range(len(chunks_t))]
+            case list():
+                chunk_names = config.chunk_name_prefix_or_list
+                if len(chunk_names) != len(chunks_t):
+                    raise ValueError("Chunk name list must match number of chunks")
+            case _:
+                raise ValueError("Invalid chunk_name_template_or_list")
+
+        return dict(zip(chunk_names, chunks_t))
 
     def _decode_impl(self, data: Tensor, params: SplitDecodingParams) -> Tensor:
         # TODO implement

@@ -12,6 +12,12 @@ E = TypeVar("E")  # encoding config type
 D = TypeVar("D")  # decoding params type
 
 
+# @dataclass
+# class NamedField:
+#     name: str
+#     field: Tensor
+
+
 class EncodingTransform(Generic[E, D]):
     """
     Base class that can be initialized with encoding_config or decoding_params.
@@ -34,21 +40,23 @@ class EncodingTransform(Generic[E, D]):
     def decoding_params(self) -> D | None:
         return self._decoding_params
 
-    def _encode_impl(self, data: Tensor, config: E) -> Tensor:
+    def _encode_impl(self, data: Tensor, config: E) -> Tensor | dict[str, Tensor]:
         """Implementation of encode logic. Override this in subclasses."""
         return data
 
-    def _decode_impl(self, data: Tensor, params: D) -> Tensor:
+    def _decode_impl(self, data: Tensor | dict[str, Tensor], params: D) -> Tensor:
         """Implementation of decode logic. Override this in subclasses."""
+        if isinstance(data, dict):
+            raise NotImplementedError("Decode logic for dict data not default-implemented.")
         return data
 
-    def encode(self, data: Tensor) -> Tensor:
+    def encode(self, data: Tensor) -> Tensor | dict[str, Tensor]:
         """Public encode method that handles parameter validation."""
         if not self.encoding_config:
             raise ValueError("No encoding_config set; cannot encode.")
         return self._encode_impl(data, self.encoding_config)
 
-    def decode(self, data: Tensor) -> Tensor:
+    def decode(self, data: Tensor | dict[str, Tensor]) -> Tensor:
         """Public decode method that handles parameter validation."""
         if not self.decoding_params:
             raise ValueError("No decoding_params set; cannot decode.")
