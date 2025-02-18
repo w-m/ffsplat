@@ -41,19 +41,19 @@ from .attr_transforms import (
 
 @dataclass
 class AttributeEncodingConfig:
-    coding: dict[str, Any]
-    reshaping: None
-    trimming: TrimmingEncodingConfig | None
-    coding_dtype: DTypeEncodingConfig | None
-    quantization: QuantizationEncodingConfig | None
-    bit_shift: BitShiftEncodingConfig | None
-    codebook: CodebookLookupEncodingConfig | None
-    split: SplitEncodingConfig | None
-    logical_or: None
-    combined_dtype: DTypeEncodingConfig | None
-    rescaling: RescalingEncodingConfig | None
-    clamping: ClampingEncodingConfig | None
-    remapping: RemappingEncodingConfig | None
+    coding: dict[str, Any] | None = None
+    reshaping: None = None
+    trimming: TrimmingEncodingConfig | None = None
+    coding_dtype: DTypeEncodingConfig | None = None
+    quantization: QuantizationEncodingConfig | None = None
+    bit_shift: BitShiftEncodingConfig | None = None
+    codebook: CodebookLookupEncodingConfig | None = None
+    split: SplitEncodingConfig | None = None
+    logical_or: None = None
+    combined_dtype: DTypeEncodingConfig | None = None
+    rescaling: RescalingEncodingConfig | None = None
+    clamping: ClampingEncodingConfig | None = None
+    remapping: RemappingEncodingConfig | None = None
 
 
 @dataclass
@@ -222,7 +222,9 @@ class NamedAttribute:
                 else None
             )
 
-        self._transforms = [
+    @property
+    def transforms(self) -> list[EncodingTransform]:
+        return [
             t
             for t in [
                 self.remapping,
@@ -317,7 +319,7 @@ class NamedAttribute:
             raise ValueError("No scene_params available for encoding")
 
         data = self._scene_params
-        for transform in self._transforms:
+        for transform in self.transforms:
             data = transform.encode(data)
 
         self._packed_data = data
@@ -330,7 +332,7 @@ class NamedAttribute:
             raise ValueError("No packed_data available for decoding")
 
         data = self._packed_data
-        for transform in reversed(self._transforms):
+        for transform in reversed(self.transforms):
             data = transform.decode(data)
 
         self._scene_params = data

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
@@ -11,6 +11,17 @@ from .attribute import (
     NamedAttribute,
     RemappingEncodingConfig,
 )
+
+
+@dataclass
+class GaussiansEncodingConfig:
+    """Holds encoding configurations for all attributes of a Gaussians instance"""
+
+    means: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
+    quaternions: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
+    scales: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
+    opacities: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
+    sh: AttributeEncodingConfig = field(default_factory=AttributeEncodingConfig)
 
 
 @dataclass
@@ -80,6 +91,14 @@ class Gaussians:
         self.opacities_attr.decode()
         self.sh_attr.decode()
 
+    def encode(self) -> None:
+        """Encode all attributes."""
+        self.means_attr.encode()
+        self.quaternions_attr.encode()
+        self.scales_attr.encode()
+        self.opacities_attr.encode()
+        self.sh_attr.encode()
+
     @classmethod
     def from_numpy(
         cls,
@@ -125,4 +144,29 @@ class Gaussians:
             scales_attr=create_attribute("scales", scales, remap_method="exp"),
             opacities_attr=create_attribute("opacities", opacities, remap_method="sigmoid"),
             sh_attr=create_attribute("sh", sh_combined),
+        )
+
+    @classmethod
+    def from_gaussians(cls, other: "Gaussians", encoding_config: GaussiansEncodingConfig) -> "Gaussians":
+        """Create a new Gaussians instance from another, applying the specified encoding configs."""
+        return cls(
+            means_attr=NamedAttribute(
+                name="means", scene_params=other.means_attr.scene_params, encoding_config=encoding_config.means
+            ),
+            quaternions_attr=NamedAttribute(
+                name="quaternions",
+                scene_params=other.quaternions_attr.scene_params,
+                encoding_config=encoding_config.quaternions,
+            ),
+            scales_attr=NamedAttribute(
+                name="scales", scene_params=other.scales_attr.scene_params, encoding_config=encoding_config.scales
+            ),
+            opacities_attr=NamedAttribute(
+                name="opacities",
+                scene_params=other.opacities_attr.scene_params,
+                encoding_config=encoding_config.opacities,
+            ),
+            sh_attr=NamedAttribute(
+                name="sh", scene_params=other.sh_attr.scene_params, encoding_config=encoding_config.sh
+            ),
         )
