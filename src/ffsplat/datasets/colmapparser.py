@@ -1,11 +1,13 @@
-import os
+# this parser builds on https://github.com/nerfstudio-project/gsplat/blob/main/examples/datasets/colmap.py
 
+import os
+from pathlib import Path
+
+import camorph.camorph as camorph
+import camorph.lib.utils.math_utils as math_utils
 import cv2
 import numpy as np
-from jaxtyping import Float
-from numpy.typing import NDArray
 from PIL import Image
-from pycolmap import SceneManager
 from tqdm import tqdm
 
 from .dataparser import DataParser
@@ -55,7 +57,7 @@ class ColmapParser(DataParser):
         self.data_dir = data_dir
         self.normalize_data = normalize_data
         self.test_every = test_every
-        self.type = "colmap"
+        self.datatype = "colmap"
 
         colmap_dir = os.path.join(data_dir, "sparse/0/")
         if not os.path.exists(colmap_dir):
@@ -63,59 +65,55 @@ class ColmapParser(DataParser):
         if not os.path.exists(colmap_dir):
             raise ValueError(f"COLMAP directory {colmap_dir} does not exist.")
 
-        manager = SceneManager(colmap_dir)
-        manager.load_cameras()
-        manager.load_images()
-
+        cams = camorph.read_cameras("COLMAP", colmap_dir)
         # Extract extrinsic matrices in world-to-camera format.
-        imdata = manager.images
-        w2c_mats = []
         camera_ids = []
+        c2w_mats = []
+        image_names = []
         Ks_dict = {}
         params_dict = {}
         imsize_dict = {}  # width, height
         mask_dict = {}
         bottom = np.array([0, 0, 0, 1]).reshape(1, 4)
-        for k in imdata:
-            im = imdata[k]
-            rot = im.R()
-            trans = im.tvec.reshape(3, 1)
-            w2c = np.concatenate([np.concatenate([rot, trans], 1), bottom], axis=0)
-            w2c_mats.append(w2c)
+        for idx, cam in enumerate(cams):
+            trans, rot = math_utils.convert_coordinate_systems(
+                ["z", "-x", "-y"], cam.t, cam.r, tdir=[0, 0, 1], tup=[0, -1, 0]
+            )
+
+            trans = trans.reshape(3, 1)
+            rot = rot.rotation_matrix
+
+            c2w = np.concatenate([np.concatenate([rot, trans], 1), bottom], axis=0)
+            c2w_mats.append(c2w)
 
             # support different camera intrinsics
-            camera_id = im.camera_id
+            camera_id = idx
             camera_ids.append(camera_id)
 
             # camera intrinsics
-            cam = manager.cameras[camera_id]
-            fx, fy, cx, cy = cam.fx, cam.fy, cam.cx, cam.cy
+            fx, fy, cx, cy = (
+                cam.focal_length_px[0],
+                cam.focal_length_px[1],
+                cam.principal_point[0],
+                cam.principal_point[1],
+            )
             K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
             Ks_dict[camera_id] = K
 
             # Get distortion parameters.
-            type_ = cam.camera_type
-            params, camtype = self._get_distortion_params(type_, cam)
+            model = cam.model
+            params, camtype = self._get_distortion_params(model, cam)
 
             params_dict[camera_id] = params
-            imsize_dict[camera_id] = (
-                cam.width // abs(factor),
-                cam.height // abs(factor),
-            )
+            imsize_dict[camera_id] = (cam.resolution[0] // abs(factor), cam.resolution[1] // abs(factor))
             mask_dict[camera_id] = None
-        print(f"[Parser] {len(imdata)} images, taken by {len(set(camera_ids))} cameras.")
+            image_names.append(Path(cam.source_image).name)
+        print(f"[Parser] {len(image_names)} images, taken by {len(set(camera_ids))} cameras.")
 
-        if len(imdata) == 0:
+        if len(image_names) == 0:
             raise ValueError("No images found in COLMAP.")
 
-        w2c_mats = np.stack(w2c_mats, axis=0)
-
-        # Convert extrinsics to camera-to-world.
-        camtoworlds = np.linalg.inv(w2c_mats)
-
-        # Image names from COLMAP. No need for permuting the poses according to
-        # image names anymore.
-        image_names = [imdata[k].name for k in imdata]
+        camtoworlds = np.stack(c2w_mats, axis=0)
 
         # Previous Nerf results were generated with images sorted by filename,
         # ensure metrics are reported on the same test set.
@@ -190,7 +188,7 @@ class ColmapParser(DataParser):
         self.mapx_dict = {}
         self.mapy_dict = {}
         self.roi_undist_dict = {}
-        self.undistort(camtype)
+        self._undistort(camtype)
 
         # size of the scene measured by cameras
         camera_locations = camtoworlds[:, :3, 3]
@@ -252,25 +250,30 @@ class ColmapParser(DataParser):
                 self.imsize_dict[camera_id] = (roi_undist[2], roi_undist[3])
                 self.mask_dict[camera_id] = mask
 
-    def _get_distortion_params(type_: int | str, cam) -> tuple[Float[NDArray], str]:
-        if type_ == 0 or type_ == "SIMPLE_PINHOLE" or type_ == 1 or type_ == "PINHOLE":
+    # WARN: this is untested for everything but pinhole
+    def _get_distortion_params(self, type_: int | str, cam):
+        if type_ == "pinhole":
             params = np.empty(0, dtype=np.float32)
             camtype = "perspective"
-        elif type_ == 2 or type_ == "SIMPLE_RADIAL":
-            params = np.array([cam.k1, 0.0, 0.0, 0.0], dtype=np.float32)
+        elif type_ == "brown":
+            params = np.zeros(4, dtype=np.float32)
+            if cam.radial_distortion is not None:
+                if len(cam.radial_distortion > 2):
+                    raise ValueError(
+                        "Only SIMPLE_RADIAL, RADIAL and OPENCV are supported. Camtype is probably FULL_OPENCV"
+                    )
+                params[: len(cam.radial_distortion)] = cam.radial_distortion
+            if cam.tangential_distortion is not None:
+                params[2 : 2 + len(cam.tangential_distortion)] = cam.tangential_distortion
             camtype = "perspective"
-        elif type_ == 3 or type_ == "RADIAL":
-            params = np.array([cam.k1, cam.k2, 0.0, 0.0], dtype=np.float32)
-            camtype = "perspective"
-        elif type_ == 4 or type_ == "OPENCV":
-            params = np.array([cam.k1, cam.k2, cam.p1, cam.p2], dtype=np.float32)
-            camtype = "perspective"
-        elif type_ == 5 or type_ == "OPENCV_FISHEYE":
-            params = np.array([cam.k1, cam.k2, cam.k3, cam.k4], dtype=np.float32)
+        elif type_ == "opencv_fisheye4":
+            params = np.zeros(4, dtype=np.float32)
+            if cam.radial_distortion is not None:
+                params[: len(cam.radial_distortion)] = cam.radial_distortion
             camtype = "fisheye"
         if camtype != "perspective" and camtype != "fisheye":
             raise ValueError(f"Only perspective and fisheye cameras are supported, got {type_}")
-        if not (type_ == 0 or type_ == 1):
+        if type_ != "pinhole":
             print("Warning: COLMAP Camera is not PINHOLE. Images have distortion.")
         return params, camtype
 
