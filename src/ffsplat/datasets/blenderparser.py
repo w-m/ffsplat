@@ -13,7 +13,7 @@ from .dataparser import DataParser
 from .normalize import normalize
 
 
-def fov2focal(fov, pixels):
+def fov2focal(fov: float, pixels: int) -> float:
     return pixels / (2 * np.tan(fov / 2))
 
 
@@ -24,30 +24,30 @@ class BlenderParser(DataParser):
         self,
         data_dir: str,
         normalize_data: bool = False,
-    ):
-        self.data_dir = data_dir
-        self.normalize_data = normalize_data
-        self.datatype = "blender"
+    ) -> None:
+        self.data_dir: str = data_dir
+        self.normalize_data: bool = normalize_data
+        self.datatype: str = "blender"
 
         # Load camera-to-world matrices.
         self.image_names: list[str] = []  # (num_images,)
         self.image_paths: list[str] = []  # (num_images,)
-        self.camtoworlds = []
+        self.camtoworlds: list[Float[NDArray, "4 4"]] = []
         self.camera_ids: list[int] = []  # (num_images,)
         self.Ks_dict: Mapping[int, Float[NDArray, "3 3"]] = {}  # camera_id -> K
         self.imsize_dict: Mapping[int, tuple[int, int]] = {}  # camera_id -> (width, height)
-        self.params_dict = {}
-        self.mask_dict = {}
+        self.params_dict: Mapping[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = {}
+        self.mask_dict: Mapping[int, None] = {}
 
         self.load_synthetic(data_dir, "transforms_train.json", 0)
 
-        self.train_indices = np.arange(len(self.image_names))
-        train_camera_id_len = len(self.camera_ids)
+        self.train_indices: Float[NDArray, " N"] = np.arange(len(self.image_names))
+        train_camera_id_len: int = len(self.camera_ids)
 
         # load test data
         self.load_synthetic(data_dir, "transforms_test.json", train_camera_id_len)
 
-        self.test_indices = np.arange(len(self.train_indices), len(self.image_names))
+        self.test_indices: Float[NDArray, " N"] = np.arange(len(self.train_indices), len(self.image_names))
 
         self.camtoworlds = np.stack(self.camtoworlds, axis=0)
 
@@ -62,21 +62,21 @@ class BlenderParser(DataParser):
         else:
             transform = np.eye(4)
 
-        self.transform = transform  # np.ndarray, (4, 4)
+        self.transform: Float[NDArray, "4 4"] = transform  # np.ndarray, (4, 4)
 
         # size of the scene measured by cameras
-        camera_locations = self.camtoworlds[:, :3, 3]
-        scene_center = np.mean(camera_locations, axis=0)
-        dists = np.linalg.norm(camera_locations - scene_center, axis=1)
-        self.scene_scale = np.max(dists)
+        camera_locations: Float[NDArray, "N 3"] = self.camtoworlds[:, :3, 3]
+        scene_center: Float[NDArray, " 3"] = np.mean(camera_locations, axis=0)
+        dists: Float[NDArray, " N"] = np.linalg.norm(camera_locations - scene_center, axis=1)
+        self.scene_scale: float = np.max(dists)
 
-    def load_synthetic(self, data_dir: str, file: str, id_offset: int):
+    def load_synthetic(self, data_dir: str, file: str, id_offset: int) -> None:
         cams = camorph.read_cameras("nerf", os.path.join(data_dir, file))
-        bottom = np.array([0, 0, 0, 1]).reshape(1, 4)
+        bottom: Float[NDArray, "1 4"] = np.array([0, 0, 0, 1]).reshape(1, 4)
 
         for idx, cam in enumerate(cams):
-            image_path = cam.source_image
-            camera_id = idx + id_offset
+            image_path: str = cam.source_image
+            camera_id: int = idx + id_offset
 
             # although the coordinate system in cams is the same here as in the colmapparser
             # we can not convert it the same way. Instead we load the transform matrix and mirror y and z axes
@@ -87,15 +87,15 @@ class BlenderParser(DataParser):
             trans = trans.reshape(3, 1)
             rot = rot.rotation_matrix
 
-            c2w = np.concatenate([np.concatenate([rot, trans], 1), bottom], axis=0)
+            c2w: Float[NDArray, " 4 4"] = np.concatenate([np.concatenate([rot, trans], 1), bottom], axis=0)
             c2w[:3, 1:3] *= -1
 
-            image_name = Path(image_path).stem
+            image_name: str = Path(image_path).stem
             image = Image.open(image_path)
 
             fx, fy = cam.focal_length_px
             cx, cy = cam.principal_point
-            K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+            K: Float[NDArray, "3 3"] = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
             self.Ks_dict[camera_id] = K
 
             self.camera_ids.append(camera_id)

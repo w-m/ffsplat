@@ -1,18 +1,24 @@
 # from https://github.com/nerfstudio-project/gsplat/blob/0880d2b471e6650d458aa09fe2b2834531f6e93b/examples/datasets/normalize.py
 
+from typing import Literal
+
 import numpy as np
+from jaxtyping import Float
+from numpy.typing import NDArray
 
 
-def similarity_from_cameras(c2w, strict_scaling=False, center_method="focus"):
+def similarity_from_cameras(
+    c2w: Float[NDArray, "N 4 4"], strict_scaling: bool = False, center_method: Literal["focus", "poses"] = "focus"
+) -> Float[NDArray, "4 4"]:
     """
     reference: nerf-factory
     Get a similarity transform to normalize dataset
     from c2w (OpenCV convention) cameras
-    :param c2w: (N, 4)
-    :return T (4,4) , scale (float)
+    :param c2w: (N, 4, 4)
+    :return T (4,4)
     """
-    t = c2w[:, :3, 3]
-    R = c2w[:, :3, :3]
+    t: Float[NDArray, "N 3"] = c2w[:, :3, 3]
+    R: Float[NDArray, "N 3 3"] = c2w[:, :3, :3]
 
     # (1) Rotate the world so that z+ is the up axis
     # we estimate the up axis by averaging the camera up axes
@@ -35,7 +41,6 @@ def similarity_from_cameras(c2w, strict_scaling=False, center_method="focus"):
         # rotate 180-deg about x axis
         R_align = np.array([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 
-    #  R_align = np.eye(3) # DEBUG
     R = R_align @ R
     fwds = np.sum(R * np.array([0, 0.0, 1.0]), axis=-1)
     t = (R_align @ t[..., None])[..., 0]
@@ -63,7 +68,7 @@ def similarity_from_cameras(c2w, strict_scaling=False, center_method="focus"):
     return transform
 
 
-def transform_cameras(matrix, camtoworlds):
+def transform_cameras(matrix: Float[NDArray, "4 4"], camtoworlds: Float[NDArray, "N 4 4"]) -> Float[NDArray, "N 4 4"]:
     """Transform cameras using an SE(3) matrix.
 
     Args:
@@ -83,7 +88,7 @@ def transform_cameras(matrix, camtoworlds):
     return camtoworlds
 
 
-def normalize(camtoworlds):
+def normalize(camtoworlds: Float[NDArray, "N 4 4"]) -> tuple[Float[NDArray, "N 4 4"], Float[NDArray, "4 4"]]:
     T1 = similarity_from_cameras(camtoworlds)
     camtoworlds = transform_cameras(T1, camtoworlds)
     return camtoworlds, T1
