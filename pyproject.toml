@@ -33,6 +33,7 @@ dependencies = [
     "tqdm>=4.67.1,<5.0.0",
     "torchmetrics>=1.6.1,<2.0.0",
     "torchvision>=0.21.0,<1.0.0",
+    "camorph",
 ]
 
 [[tool.uv.index]]
@@ -47,6 +48,7 @@ torch = [
 torchvision = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+camorph = { git = "https://github.com/fbranschke/camorph.git" }
 
 
 [project.urls]

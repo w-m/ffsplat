@@ -1,8 +1,9 @@
-import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
 
+import camorph.camorph as camorph
+import camorph.lib.utils.math_utils as math_utils
 import numpy as np
 from jaxtyping import Float
 from numpy.typing import NDArray
@@ -26,7 +27,7 @@ class BlenderParser(DataParser):
     ):
         self.data_dir = data_dir
         self.normalize_data = normalize_data
-        self.type = "blender"
+        self.datatype = "blender"
 
         # Load camera-to-world matrices.
         self.image_names: list[str] = []  # (num_images,)
@@ -44,11 +45,11 @@ class BlenderParser(DataParser):
         train_camera_id_len = len(self.camera_ids)
 
         # load test data
-        self.load_synthetic(data_dir, "transforms_train.json", train_camera_id_len)
+        self.load_synthetic(data_dir, "transforms_test.json", train_camera_id_len)
 
         self.test_indices = np.arange(len(self.train_indices), len(self.image_names))
 
-        self.camtoworlds = np.array(self.camtoworlds)
+        self.camtoworlds = np.stack(self.camtoworlds, axis=0)
 
         print(f"[Parser] {len(self.image_names)} images, taken by {len(set(self.camera_ids))} cameras.")
 
@@ -70,35 +71,42 @@ class BlenderParser(DataParser):
         self.scene_scale = np.max(dists)
 
     def load_synthetic(self, data_dir: str, file: str, id_offset: int):
-        with open(os.path.join(data_dir, file)) as json_file:
-            contents = json.load(json_file)
-            FOVX = contents["camera_angle_x"]
+        cams = camorph.read_cameras("nerf", os.path.join(data_dir, file))
+        bottom = np.array([0, 0, 0, 1]).reshape(1, 4)
 
-            for idx, frame in enumerate(contents["frames"]):
-                image_path = os.path.join(data_dir, frame["file_path"] + ".png")
-                camera_id = idx + id_offset
+        for idx, cam in enumerate(cams):
+            image_path = cam.source_image
+            camera_id = idx + id_offset
 
-                c2w = np.array(frame["transform_matrix"])
-                c2w[:3, 1:3] *= -1
+            # although the coordinate system in cams is the same here as in the colmapparser
+            # we can not convert it the same way. Instead we load the transform matrix and mirror y and z axes
+            # to be compatible with other 3dgs implementations
+            trans, rot = math_utils.convert_coordinate_systems(
+                ["y", "-x", "z"], cam.t, cam.r, tdir=[0, 0, -1], tup=[0, 1, 0], transpose=True
+            )
+            trans = trans.reshape(3, 1)
+            rot = rot.rotation_matrix
 
-                image_name = Path(image_path).stem
-                image = Image.open(image_path)
+            c2w = np.concatenate([np.concatenate([rot, trans], 1), bottom], axis=0)
+            c2w[:3, 1:3] *= -1
 
-                fx = fov2focal(FOVX, image.width)
-                fy = fov2focal(FOVX, image.height)
-                cx, cy = 0.5 * image.width, 0.5 * image.height
-                K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
-                self.Ks_dict[camera_id] = K
+            image_name = Path(image_path).stem
+            image = Image.open(image_path)
 
-                self.camera_ids.append(camera_id)
-                self.camtoworlds.append(c2w)
-                self.imsize_dict[camera_id] = (
-                    image.width,
-                    image.height,
-                )
-                # assume no distortion
-                self.params_dict[camera_id] = np.empty(0, dtype=np.float32)
-                self.mask_dict[camera_id] = None
-                self.image_names.append(image_name)
-                self.image_paths.append(image_path)
+            fx, fy = cam.focal_length_px
+            cx, cy = cam.principal_point
+            K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+            self.Ks_dict[camera_id] = K
+
+            self.camera_ids.append(camera_id)
+            self.camtoworlds.append(c2w)
+            self.imsize_dict[camera_id] = (
+                image.width,
+                image.height,
+            )
+            # assume no distortion
+            self.params_dict[camera_id] = np.empty(0, dtype=np.float32)
+            self.mask_dict[camera_id] = None
+            self.image_names.append(image_name)
+            self.image_paths.append(image_path)
         return
