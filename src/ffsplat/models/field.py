@@ -6,6 +6,7 @@ from typing import Any, Literal, Self
 import numpy as np
 import torch
 from numpy.typing import NDArray
+from plyfile import PlyData
 from torch import Tensor
 
 from .transforms import (
@@ -637,3 +638,45 @@ class DecodingField:
         if reshaping:
             result.reshaping = SquareGridTransform()
         return result
+
+
+@dataclass
+class FieldDecoder:
+    transforms: list[EncodingTransform] = field(default_factory=list)
+
+    def __init__(self, scene_decoder: SceneDecoder, field_name: str, field_meta: list[dict[str, Any]]) -> None:
+        # for meta in field_meta:
+        #     field = NamedField(name=field_name, encoding_config=FieldEncodingConfig(**meta))
+        #     self.transforms.extend(field.transforms)
+        pass
+
+
+def decode_ply(file_name: str, into: list[str]) -> dict[str, Tensor]:
+    vertices = PlyData.read(file_name)["vertex"]
+    data = {}
+    for into_name in into:
+        data[into_name] = torch.from_numpy(vertices[into_name])
+    return data
+
+
+@dataclass
+class SceneDecoder:
+    fields: dict[str, Any] = field(default_factory=dict)
+
+    def __init__(self, file_descriptions: dict[str, Any], field_decoding_meta: dict[str, list[dict[str, Any]]]) -> None:
+        for file_name, file_description in file_descriptions.items():
+            file_type = file_description["type"]
+            into = file_description["into"]
+            match file_type:
+                case "ply":
+                    self.fields.update(decode_ply(file_name, into))
+                case _:
+                    raise ValueError(f"Unknown file type {file_type}")
+
+        for field_name, field_meta in field_decoding_meta.items():
+            self.fields[field_name] = FieldDecoder(self, field_name, field_meta)
+
+    def decode_field(self, field: str) -> Tensor:
+        if field not in self.fields:
+            raise ValueError(f"Field {field} not found in scene decoder")
+        return self.fields[field].decode()

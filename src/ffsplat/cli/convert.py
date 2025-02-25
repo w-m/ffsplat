@@ -1,10 +1,12 @@
 import sys
 from pathlib import Path
 
+import yaml
 from jsonargparse import ArgumentParser
 
 from ..coding.sog_arxiv import encode_sog_arxiv
 from ..io.ply import load_ply, save_ply
+from ..models.field import SceneDecoder
 
 
 def main() -> None:
@@ -38,11 +40,17 @@ def main() -> None:
         print(f"Error creating output directory: {e}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        gaussians = load_ply(cfg.input)
-    except Exception as e:
-        print(f"Error loading file: {e}", file=sys.stderr)
-        sys.exit(1)
+    if False:
+        try:
+            gaussians = load_ply(cfg.input)
+        except Exception as e:
+            print(f"Error loading file: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    with open(cfg.input) as f:
+        data = yaml.safe_load(f)
+
+    decoder = SceneDecoder(data["files"], data["fields"])
 
     gaussians.decode()
 

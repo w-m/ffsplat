@@ -26,7 +26,8 @@ dependencies = [
     "jsonargparse>=4.37.0,<5.0.0",
     # TODO imagecodecs version > 2023.9.18 produce much larger JPEG XL files: https://github.com/fraunhoferhhi/Self-Organizing-Gaussians/issues/3
     # but for numpy > 2, we require a modern imagecodecs
-    "imagecodecs[all]>=2024.12.30"
+    "imagecodecs[all]>=2024.12.30",
+    "PyYAML>=6.0.2,<7.0.0",
 ]
 
 [[tool.uv.index]]

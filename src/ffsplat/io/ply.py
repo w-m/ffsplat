@@ -3,8 +3,9 @@ from pathlib import Path
 import numpy as np
 from plyfile import PlyData, PlyElement
 
-from ..models.attribute import NamedAttribute
+from ..models.field import FieldEncodingConfig, NamedField
 from ..models.gaussians import Gaussians
+from ..models.transforms import RemappingEncodingConfig, SplitEncodingConfig
 
 
 def load_ply(path: Path) -> Gaussians:
@@ -52,16 +53,18 @@ def load_ply(path: Path) -> Gaussians:
     # Combine sh0 and shN into a single array
     sh_combined = np.concatenate([sh0, shN], axis=1)
 
-    return Gaussians(
-        means_attr=NamedAttribute.from_packed_data(name="means", packed_data=means),
-        quaternions_attr=NamedAttribute.from_packed_data(name="quaternions", packed_data=quats),
-        scales_attr=NamedAttribute.from_packed_data(name="scales", packed_data=scales, remapping="exp"),
-        opacities_attr=NamedAttribute.from_packed_data(name="opacities", packed_data=opacities, remapping="sigmoid"),
-        sh_attr=NamedAttribute.from_packed_data(name="sh", packed_data=sh_combined),
+    gaussians = Gaussians(
+        means_attr=NamedField.from_packed_data(name="means", packed_data=means),
+        quaternions_attr=NamedField.from_packed_data(name="quaternions", packed_data=quats),
+        scales_attr=NamedField.from_packed_data(name="scales", packed_data=scales, remapping="exp"),
+        opacities_attr=NamedField.from_packed_data(name="opacities", packed_data=opacities, remapping="sigmoid"),
+        sh_attr=NamedField.from_packed_data(name="sh", packed_data=sh_combined),
     )
 
+    return gaussians
 
-def save_ply(gaussians: Gaussians, path: Path) -> None:
+
+def save_ply(input_gaussians: Gaussians, path: Path) -> None:
     """Save a Gaussians instance to a PLY file.
 
     Args:
@@ -69,13 +72,47 @@ def save_ply(gaussians: Gaussians, path: Path) -> None:
         path: Path where to save the PLY file
     """
 
-    means = gaussians.means_attr.packed_data.cpu().numpy()
-    quats = gaussians.quaternions_attr.packed_data.cpu().numpy()
-    scales = gaussians.scales_attr.packed_data.cpu().numpy()
-    opacities = gaussians.opacities_attr.packed_data.cpu().numpy()
+    # ply_coding_config = GaussiansEncodingConfig(
+    #     # means=AttributeEncodingConfig(),
+    #     # quaternions=AttributeEncodingConfig(),
+    #     scales=AttributeEncodingConfig(remapping=RemappingEncodingConfig(method="exp")),
+    #     opacities=AttributeEncodingConfig(remapping=RemappingEncodingConfig(method="sigmoid")),
+    #     sh=AttributeEncodingConfig(
+    #         split=SplitEncodingConfig(
+    #             split_dim=1, split_size_or_sections=[1, 15], chunk_name_prefix_or_list=["f_dc", "f_rest"]
+    #         )
+    #     ),
+    # )
+
+    # ply_coding_config = AttributeEncodingConfig()
+
+    ply_coding_config = {
+        "means": FieldEncodingConfig(),
+        "quaternions": FieldEncodingConfig(),
+        "scales": FieldEncodingConfig(remapping=RemappingEncodingConfig(method="exp")),
+        "opacities": FieldEncodingConfig(remapping=RemappingEncodingConfig(method="sigmoid")),
+        "sh": FieldEncodingConfig(
+            split=SplitEncodingConfig(
+                split_dim=1, split_size_or_sections=[1, 15], chunk_name_prefix_or_list=["f_dc", "f_rest"]
+            )
+        ),
+        "f_dc": FieldEncodingConfig(),
+        "f_rest": FieldEncodingConfig(
+            split=SplitEncodingConfig(split_dim=1, split_size_or_sections=3, chunk_name_prefix_or_list="f_rest")
+        ),
+    }
+
+    output_gaussians = Gaussians.from_gaussians(input_gaussians, encoding_config=ply_coding_config)
+
+    output_gaussians.encode()
+
+    means = input_gaussians.means_attr.packed_data.cpu().numpy()
+    quats = input_gaussians.quaternions_attr.packed_data.cpu().numpy()
+    scales = input_gaussians.scales_attr.packed_data.cpu().numpy()
+    opacities = input_gaussians.opacities_attr.packed_data.cpu().numpy()
 
     # Handle spherical harmonics
-    sh_data = gaussians.sh_attr.packed_data.cpu().numpy()
+    sh_data = input_gaussians.sh_attr.packed_data.cpu().numpy()
     sh0 = sh_data[:, :1, :]  # (N, 1, 3)
     shN = sh_data[:, 1:, :]  # (N, S, 3)
 
