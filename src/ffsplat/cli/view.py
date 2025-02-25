@@ -1,5 +1,6 @@
 import time
 from argparse import ArgumentParser
+from pathlib import Path
 
 import torch
 import viser
@@ -8,7 +9,7 @@ from jaxtyping import Float
 from numpy.typing import NDArray
 from torch import Tensor
 
-from ..io.ply import load_ply
+from ..coding.scene_decoder import decode_gaussians
 from ..render.viewer import CameraState, Viewer
 
 
@@ -53,11 +54,11 @@ def render_fn(
 # Create render function with bound parameters
 def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
     return render_fn(
-        gaussians.means_attr.decode(),
-        gaussians.quaternions_attr.decode(),
-        gaussians.scales_attr.decode(),
-        gaussians.opacities_attr.decode(),
-        gaussians.sh_attr.decode(),
+        gaussians.means,
+        gaussians.quaternions,
+        gaussians.scales,
+        gaussians.opacities,
+        gaussians.sh,
         gaussians.sh_degree,
         camera_state,
         img_wh,
@@ -66,11 +67,18 @@ def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArr
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Interactive compression tool parameters")
-    parser.add_argument("--data_path", type=str)
+    parser.add_argument("--input", type=Path, required=True, help="Input file or directory path")
+    # TODO: add support for guessing input format
+    parser.add_argument(
+        "--input-format",
+        type=str,
+        required=True,
+        help="Input format",
+    )
 
-    args = parser.parse_args()
+    cfg = parser.parse_args()
 
-    gaussians = load_ply(args.data_path).to("cuda")
+    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format).to("cuda")
 
     server = viser.ViserServer(verbose=False)
     viewer = Viewer(server=server, render_fn=bound_render_fn, mode="rendering")

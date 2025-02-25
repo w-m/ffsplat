@@ -3,7 +3,7 @@ from pathlib import Path
 
 from jsonargparse import ArgumentParser
 
-from ..coding.scene_decoder import DecodingParams, SceneDecoder
+from ..coding.scene_decoder import decode_gaussians
 from ..coding.sog_arxiv import encode_sog_arxiv
 from ..io.ply import save_ply
 
@@ -43,15 +43,7 @@ def main() -> None:
         print(f"Error creating output directory: {e}", file=sys.stderr)
         sys.exit(1)
 
-    input_file_extension = cfg.input.suffix
-
-    if cfg.input_format == "3DGS-INRIA" and input_file_extension == ".ply":
-        decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_template.yaml")).with_input_path(cfg.input)
-
-    decoder = SceneDecoder(decoding_params)
-    decoder.decode()
-
-    gaussians = decoder.scene
+    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format)
 
     try:
         save_ply(gaussians, cfg.output)

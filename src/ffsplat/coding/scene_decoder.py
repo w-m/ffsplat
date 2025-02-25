@@ -124,3 +124,18 @@ class SceneDecoder:
         self._decode_files()
         self._process_fields()
         self._create_scene()
+
+
+def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
+    input_file_extension = input_path.suffix
+
+    if input_format == "3DGS-INRIA" and input_file_extension == ".ply":
+        decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_template.yaml")).with_input_path(
+            input_path
+        )
+
+    decoder = SceneDecoder(decoding_params)
+    decoder.decode()
+    gaussians = decoder.scene
+
+    return gaussians
