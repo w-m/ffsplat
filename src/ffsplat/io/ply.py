@@ -1,14 +1,25 @@
 from pathlib import Path
 
 import numpy as np
+import torch
 from plyfile import PlyData, PlyElement
+from torch import Tensor
 
-from ..models.field import FieldEncodingConfig, NamedField
-from ..models.gaussians import Gaussians
-from ..models.transforms import RemappingEncodingConfig, SplitEncodingConfig
+# from ..models_v0.field import FieldEncodingConfig, NamedField
+from ..models_v0.gaussians import Gaussians
+from ..models_v0.transforms import RemappingEncodingConfig, SplitEncodingConfig
 
 
-def load_ply(path: Path) -> Gaussians:
+def decode_ply(file_path: Path, field_prefix: str) -> dict[str, torch.Tensor]:
+    vertices = PlyData.read(file_path)["vertex"]
+    data = {}
+    for prop in vertices.properties:
+        data[f"{field_prefix}{prop.name}"] = torch.from_numpy(vertices[prop.name])
+
+    return data
+
+
+def load_ply(path: Path) -> dict[str, Tensor]:
     """Load a PLY file into a Gaussians instance
 
     Args:

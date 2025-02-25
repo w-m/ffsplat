@@ -1,12 +1,11 @@
 import sys
 from pathlib import Path
 
-import yaml
 from jsonargparse import ArgumentParser
 
+from ..coding.scene_decoder import DecodingParams, SceneDecoder
 from ..coding.sog_arxiv import encode_sog_arxiv
-from ..io.ply import load_ply, save_ply
-from ..models.field import SceneDecoder
+from ..io.ply import save_ply
 
 
 def main() -> None:
@@ -19,8 +18,12 @@ def main() -> None:
         default_config_files=["config.yaml"],
     )
     parser.add_argument("--input", type=Path, required=True, help="Input file or directory path")
+    # TODO: add support for guessing input format
     parser.add_argument(
-        "--input-format", type=str, help="Input format (optional, will be inferred from extension if not provided)"
+        "--input-format",
+        type=str,
+        required=True,
+        help="Input format",
     )
     parser.add_argument("--output", type=Path, required=True, help="Output file or directory path")
     # parser.add_argument("--codec", type=Path, help="Path to encoding YAML configuration file")
@@ -40,19 +43,15 @@ def main() -> None:
         print(f"Error creating output directory: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if False:
-        try:
-            gaussians = load_ply(cfg.input)
-        except Exception as e:
-            print(f"Error loading file: {e}", file=sys.stderr)
-            sys.exit(1)
+    input_file_extension = cfg.input.suffix
 
-    with open(cfg.input) as f:
-        data = yaml.safe_load(f)
+    if cfg.input_format == "3DGS-INRIA" and input_file_extension == ".ply":
+        decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_template.yaml")).with_input_path(cfg.input)
 
-    decoder = SceneDecoder(data["files"], data["fields"])
+    decoder = SceneDecoder(decoding_params)
+    decoder.decode()
 
-    gaussians.decode()
+    gaussians = decoder.scene
 
     try:
         save_ply(gaussians, cfg.output)
