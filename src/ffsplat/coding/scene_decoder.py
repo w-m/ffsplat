@@ -52,60 +52,76 @@ class SceneDecoder:
                 case _:
                     raise ValueError(f"Unsupported file type: {type}")
 
+    def _process_field(self, field_op: dict[str, Any], field_data: Tensor | None) -> Tensor:
+        match field_op:
+            case {"combine": {"from_fields_with_prefix": from_prefix, "method": method, "dim": dim}}:
+                prefix_tensors: list[Tensor] = [
+                    field_data
+                    for source_field_name, field_data in self.fields.items()
+                    if source_field_name.startswith(from_prefix)
+                ]
+                if method == "stack":
+                    field_data = torch.stack(prefix_tensors, dim=dim)
+                elif method == "concat":
+                    field_data = torch.cat(prefix_tensors, dim=dim)
+                else:
+                    raise ValueError(f"Unsupported combine method: {method}")
+
+            case {"combine": {"from_field_list": from_list, "method": method, "dim": dim}}:
+                source_tensors: list[Tensor] = [
+                    self.fields[source_field_name]
+                    for source_field_name in from_list
+                    if source_field_name in self.fields
+                ]
+                if method == "stack":
+                    field_data = torch.stack(source_tensors, dim=dim)
+                elif method == "concat":
+                    field_data = torch.cat(source_tensors, dim=dim)
+                else:
+                    raise ValueError(f"Unsupported combine method: {method}")
+
+            case {"from_field": name}:
+                if name in self.fields:
+                    field_data = self.fields[name]
+                else:
+                    raise ValueError(f"Field not found: {name}")
+
+            case {"reshape": {"shape": shape}}:
+                if field_data is None:
+                    raise ValueError("Field data is None before reshape")
+                field_data = field_data.reshape(*shape)
+
+            case {"permute": {"dims": dims}}:
+                if field_data is None:
+                    raise ValueError("Field data is None before permute")
+                field_data = field_data.permute(*dims)
+
+            case {"remapping": {"method": method}}:
+                if field_data is None:
+                    raise ValueError("Field data is None before remapping")
+
+                match method:
+                    case "exp":
+                        field_data = torch.exp(field_data)
+                    case "sigmoid":
+                        field_data = torch.sigmoid(field_data)
+                    case _:
+                        raise ValueError(f"Unsupported remapping method: {method}")
+            case _:
+                raise ValueError(f"Unsupported field operation: {field_op}")
+
+        return field_data
+
     def _process_fields(self) -> None:
         for field_name, field_ops in self.decoding_params.fields.items():
+            field_data = None
             for field_op in field_ops:
-                match field_op:
-                    case {"combine": {"from_fields_with_prefix": from_prefix, "method": method, "dim": dim}}:
-                        prefix_tensors: list[Tensor] = [
-                            field_data
-                            for source_field_name, field_data in self.fields.items()
-                            if source_field_name.startswith(from_prefix)
-                        ]
-                        if method == "stack":
-                            field_data = torch.stack(prefix_tensors, dim=dim)
-                        elif method == "concat":
-                            field_data = torch.cat(prefix_tensors, dim=dim)
-                        else:
-                            raise ValueError(f"Unsupported combine method: {method}")
+                field_data = self._process_field(field_op, field_data)
 
-                    case {"combine": {"from_field_list": from_list, "method": method, "dim": dim}}:
-                        source_tensors: list[Tensor] = [
-                            self.fields[source_field_name]
-                            for source_field_name in from_list
-                            if source_field_name in self.fields
-                        ]
-                        if method == "stack":
-                            field_data = torch.stack(source_tensors, dim=dim)
-                        elif method == "concat":
-                            field_data = torch.cat(source_tensors, dim=dim)
-                        else:
-                            raise ValueError(f"Unsupported combine method: {method}")
-
-                    case {"from_field": name}:
-                        if name in self.fields:
-                            field_data = self.fields[name]
-                        else:
-                            raise ValueError(f"Field not found: {name}")
-
-                    case {"reshape": {"shape": shape}}:
-                        field_data = field_data.reshape(*shape)
-
-                    case {"permute": {"dims": dims}}:
-                        field_data = field_data.permute(*dims)
-
-                    case {"remapping": {"method": method}}:
-                        match method:
-                            case "exp":
-                                field_data = torch.exp(field_data)
-                            case "sigmoid":
-                                field_data = torch.sigmoid(field_data)
-                            case _:
-                                raise ValueError(f"Unsupported remapping method: {method}")
-                    case _:
-                        raise ValueError(f"Unsupported field operation: {field_op}")
-
-            self.fields[field_name] = field_data
+            if field_data is not None:
+                self.fields[field_name] = field_data
+            else:
+                raise ValueError(f"Empty field after processing field operations: {field_name}")
 
     def _create_scene(self) -> None:
         match self.decoding_params.scene.get("primitives"):
