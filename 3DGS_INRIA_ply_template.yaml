@@ -26,7 +26,7 @@ files:
 fields:
   f_dc:
     - combine:
-        from_prefix: point_cloud.ply@f_dc_
+        from_fields_with_prefix: point_cloud.ply@f_dc_
         method: stack
         dim: 1
     - reshape:
@@ -34,7 +34,7 @@ fields:
   
   f_rest:
     - combine:
-        from_prefix: point_cloud.ply@f_rest_
+        from_fields_with_prefix: point_cloud.ply@f_rest_
         method: stack
         dim: 1
     - reshape:
@@ -47,32 +47,32 @@ fields:
 
   sh:
     - combine:
-        from: [f_dc, f_rest]  
+        from_field_list: [f_dc, f_rest]  
         method: concat
         dim: 1
 
   quaternions:
     - combine:
-        from_prefix: point_cloud.ply@rot_
+        from_fields_with_prefix: point_cloud.ply@rot_
         method: stack
         dim: 1
 
   means:
     - combine:
-        from: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+        from_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
         method: stack
         dim: 1
   
   scales:
     - combine:
-        from_prefix: point_cloud.ply@scale_
+        from_fields_with_prefix: point_cloud.ply@scale_
         method: stack
         dim: 1
     - remapping:
         method: exp
   
   opacities: 
-    - from: point_cloud.ply@opacity
+    - from_field: point_cloud.ply@opacity
     - remapping:
         method: sigmoid
 

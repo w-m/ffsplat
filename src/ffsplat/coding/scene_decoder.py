@@ -56,7 +56,7 @@ class SceneDecoder:
         for field_name, field_ops in self.decoding_params.fields.items():
             for field_op in field_ops:
                 match field_op:
-                    case {"combine": {"from_prefix": from_prefix, "method": method, "dim": dim}}:
+                    case {"combine": {"from_fields_with_prefix": from_prefix, "method": method, "dim": dim}}:
                         prefix_tensors: list[Tensor] = [
                             field_data
                             for source_field_name, field_data in self.fields.items()
@@ -69,7 +69,7 @@ class SceneDecoder:
                         else:
                             raise ValueError(f"Unsupported combine method: {method}")
 
-                    case {"combine": {"from": from_list, "method": method, "dim": dim}}:
+                    case {"combine": {"from_field_list": from_list, "method": method, "dim": dim}}:
                         source_tensors: list[Tensor] = [
                             self.fields[source_field_name]
                             for source_field_name in from_list
@@ -82,7 +82,7 @@ class SceneDecoder:
                         else:
                             raise ValueError(f"Unsupported combine method: {method}")
 
-                    case {"from": name}:
+                    case {"from_field": name}:
                         if name in self.fields:
                             field_data = self.fields[name]
                         else:
