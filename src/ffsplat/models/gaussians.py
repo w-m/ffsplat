@@ -38,16 +38,7 @@ class Gaussians:
             N = None
             n_display = "?"
 
-        attrs = [
-            f"{name}: {attr_tensor_str(attr, N)}"
-            for name, attr in [
-                ("means", self.means),
-                ("quaternions", self.quaternions),
-                ("scales", self.scales),
-                ("opacities", self.opacities),
-                ("sh", self.sh),
-            ]
-        ]
+        attrs = [f"{name}: {attr_tensor_str(attr, N)}" for name, attr in self.to_dict().items()]
 
         return f"Gaussians(N={n_display}, sh_degree={self.sh_degree}, device={self.device})\n  " + "\n  ".join(attrs)
 
@@ -75,3 +66,12 @@ class Gaussians:
         # Data shape is (N, num_coeffs, 3), where num_coeffs = (degree + 1)^2
         # So num_coeffs = shape[1], and we solve for degree
         return int(math.sqrt(self.sh.shape[1]) - 1)
+
+    def to_dict(self) -> dict:
+        return {
+            "means": self.means,
+            "quaternions": self.quaternions,
+            "scales": self.scales,
+            "opacities": self.opacities,
+            "sh": self.sh,
+        }

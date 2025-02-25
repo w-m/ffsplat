@@ -19,6 +19,19 @@ def decode_ply(file_path: Path, field_prefix: str) -> dict[str, torch.Tensor]:
     return data
 
 
+def encode_ply(fields: dict[str, Tensor], path: Path) -> None:
+    dtype_list = [(field_name, "f4") for field_name in fields]
+
+    num_primitives = len(next(iter(fields.values())))
+    vertex_data = np.empty(num_primitives, dtype=dtype_list)
+
+    for field_name, field_data in fields.items():
+        vertex_data[field_name] = field_data.cpu().numpy()
+
+    vertex_element = PlyElement.describe(vertex_data, "vertex")
+    PlyData([vertex_element], text=False).write(str(path))
+
+
 def load_ply(path: Path) -> dict[str, Tensor]:
     """Load a PLY file into a Gaussians instance
 

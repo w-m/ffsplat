@@ -15,7 +15,7 @@ class DecodingParams:
     """Parameters for decoding 3D scene formats."""
 
     files: list[dict[str, str]]
-    fields: dict[str, dict[str, Any]]
+    fields: dict[str, list[dict[str, Any]]]
     scene: dict[str, Any]
 
     @classmethod
@@ -145,10 +145,12 @@ class SceneDecoder:
 def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
     input_file_extension = input_path.suffix
 
-    if input_format == "3DGS-INRIA" and input_file_extension == ".ply":
-        decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_template.yaml")).with_input_path(
+    if input_format == "3DGS-INRIA.ply" and input_file_extension == ".ply":
+        decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_decoding_template.yaml")).with_input_path(
             input_path
         )
+    else:
+        raise ValueError(f"Unsupported input format: {input_format}")
 
     decoder = SceneDecoder(decoding_params)
     decoder.decode()

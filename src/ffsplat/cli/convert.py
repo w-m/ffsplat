@@ -4,8 +4,7 @@ from pathlib import Path
 from jsonargparse import ArgumentParser
 
 from ..coding.scene_decoder import decode_gaussians
-from ..coding.sog_arxiv import encode_sog_arxiv
-from ..io.ply import save_ply
+from ..coding.scene_encoder import encode_gaussians
 
 
 def main() -> None:
@@ -26,7 +25,7 @@ def main() -> None:
         help="Input format",
     )
     parser.add_argument("--output", type=Path, required=True, help="Output file or directory path")
-    # parser.add_argument("--codec", type=Path, help="Path to encoding YAML configuration file")
+    parser.add_argument("--output-format", type=str, required=True, help="Output format")
 
     cfg = parser.parse_args()
 
@@ -45,18 +44,7 @@ def main() -> None:
 
     gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format)
 
-    try:
-        save_ply(gaussians, cfg.output)
-    except Exception as e:
-        print(f"Error saving file: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if False:
-        try:
-            encode_sog_arxiv(input_gaussians=gaussians, output_path=cfg.output)
-        except Exception as e:
-            print(f"Error encoding file: {e}", file=sys.stderr)
-            sys.exit(1)
+    encode_gaussians(gaussians=gaussians, output_path=cfg.output, output_format=cfg.output_format)
 
     print(f"Successfully converted {cfg.input} to {cfg.output}")
 

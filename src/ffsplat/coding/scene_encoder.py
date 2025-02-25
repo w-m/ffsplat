@@ -1,0 +1,201 @@
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import torch
+import yaml
+from torch import Tensor
+
+from ..io.ply import encode_ply
+from ..models.gaussians import Gaussians
+
+
+@dataclass
+class DecodingParams:
+    # TODO duplicated definition from scene_decoder
+    # in decoding, the fields shouldn't be nullable
+    """Parameters for decoding 3D scene formats."""
+
+    files: list[dict[str, str]] = field(default_factory=list)
+    fields: defaultdict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
+    scene: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EncodingParams:
+    fields: dict[str, dict[str, Any]]
+    files: list[dict[str, str]]
+
+    @classmethod
+    def from_yaml_file(cls, yaml_path: Path) -> "EncodingParams":
+        with open(yaml_path) as f:
+            data = yaml.safe_load(f)
+        return cls(files=data.get("files", []), fields=data.get("fields", {}))
+
+
+@dataclass
+class SceneEncoder:
+    encoding_params: EncodingParams
+    output_path: Path
+    fields: dict[str, Tensor] = field(default_factory=dict)
+
+    decoding_params: DecodingParams = field(default_factory=DecodingParams)
+
+    # encoding YAML
+
+    # fields:
+    #   sh:
+    #     - split:
+    #         to_field_list: [f_dc, f_rest]
+    #         split_size_or_sections: [1, 15]
+    #         dim: 1
+
+    #   f_dc:
+    #     - reshape:
+    #         shape: [-1, 3]
+    #     - split:
+    #         to_fields_with_prefix: point_cloud.ply@f_dc_
+    #         split_size_or_sections: 1
+    #         dim: 1
+
+    #   f_rest:
+    #     # TODO what is the correct order of f_rest?
+    #     # requires reshape / permute?
+    #     - reshape:
+    #         shape: [-1, 45]
+    #     - split:
+    #         to_fields_with_prefix: point_cloud.ply@f_rest_
+    #         split_size_or_sections: 1
+    #         dim: 1
+
+    #   quaternions:
+    #     - split:
+    #         to_fields_with_prefix: point_cloud.ply@rot_
+    #         split_size_or_sections: 1
+    #         dim: 1
+
+    #   means:
+    #     - split:
+    #         to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+    #         split_size_or_sections: 1
+    #         dim: 1
+
+    #   scales:
+    #     - remapping:
+    #         method: exp
+    #         inverse: True
+    #     - split:
+    #         to_fields_with_prefix: point_cloud.ply@scale_
+    #         split_size_or_sections: 1
+    #         dim: 1
+
+    #   opacities:
+    #     - remapping:
+    #         method: sigmoid
+    #         inverse: True
+    #     - to_field: point_cloud.ply@opacity
+
+    # files:
+    #   - file_path: "point_cloud.ply"
+    #     type: ply
+    #     fields_with_prefix: point_cloud.ply@
+
+    def _encode_fields(self) -> None:
+        # go through the fields of encoding params
+        for field_name, field_config in self.encoding_params.fields.items():
+            field_data = self.fields.get(field_name)
+            if field_data is None:
+                raise ValueError(f"Field data is None: {field_name}")
+
+            for field_op in field_config:
+                match field_op:
+                    case {
+                        "split": {
+                            "to_fields_with_prefix": to_fields_with_prefix,
+                            "split_size_or_sections": split_size_or_sections,
+                            "dim": dim,
+                        }
+                    }:
+                        field_data = field_data.split(split_size_or_sections, dim)
+                        for i, chunk in enumerate(field_data):
+                            self.fields[f"{to_fields_with_prefix}{i}"] = chunk.squeeze(dim)
+
+                        self.decoding_params.fields[field_name].append({
+                            "combine": {
+                                "from_fields_with_prefix": to_fields_with_prefix,
+                                "method": "stack" if split_size_or_sections == 1 else "concat",
+                                "dim": dim,
+                            }
+                        })
+
+                    case {
+                        "split": {
+                            "to_field_list": to_field_list,
+                            "split_size_or_sections": split_size_or_sections,
+                            "dim": dim,
+                        }
+                    }:
+                        field_data = field_data.split(split_size_or_sections, dim)
+                        for target_field_name, target_field_data in zip(to_field_list, field_data):
+                            self.fields[target_field_name] = target_field_data.squeeze(dim)
+
+                        self.decoding_params.fields[field_name].append({
+                            "combine": {
+                                "from_field_list": to_field_list,
+                                "method": "stack" if split_size_or_sections == 1 else "concat",
+                                "dim": dim,
+                            }
+                        })
+
+                    case {"reshape": {"shape": shape}}:
+                        self.decoding_params.fields[field_name].append({"reshape": {"shape": field_data.shape}})
+                        field_data = field_data.reshape(*shape)
+
+                    case {"remapping": {"method": "log"}}:
+                        self.decoding_params.fields[field_name].append({"remapping": {"method": "exp"}})
+                        field_data = field_data.log()
+
+                    case {"remapping": {"method": "inverse-sigmoid"}}:
+                        self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
+                        field_data = torch.log(field_data / (1 - field_data))
+
+                    case {"to_field": name}:
+                        self.decoding_params.fields[field_name].append({"from_field": name})
+                        self.fields[name] = field_data
+
+    def _write_files(self) -> None:
+        for file in self.encoding_params.files:
+            file_path = Path(file["file_path"])
+            file_type = file["type"]
+            field_prefix = file["fields_with_prefix"]
+
+            fields_to_write = {
+                field_name[len(field_prefix) :]: field_data
+                for field_name, field_data in self.fields.items()
+                if field_name.startswith(field_prefix)
+            }
+
+            match file_type:
+                case "ply":
+                    encode_ply(fields=fields_to_write, path=file_path)
+                case _:
+                    raise NotImplementedError(f"Encoding for {file_type} is not supported")
+
+    def encode(self) -> None:
+        self._encode_fields()
+        self._write_files()
+
+        with open(self.output_path / "container_meta.yaml", "w") as f:
+            yaml.dump(self.decoding_params, f)
+
+
+def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str) -> None:
+    match output_format:
+        case "3DGS-INRIA.ply":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_ply.yaml"))
+        case _:
+            raise ValueError(f"Unsupported output format: {output_format}")
+
+    encoder = SceneEncoder(encoding_params=encoding_params, output_path=output_path, fields=gaussians.to_dict())
+    encoder.encode()
