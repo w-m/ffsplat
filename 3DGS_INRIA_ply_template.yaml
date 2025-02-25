@@ -1,3 +1,23 @@
+container_identifier: smurfx
+container_version: 0.1
+
+# this is a template file for .ply files without any metadata
+packer: unknown
+
+profile: 3DGS-INRIA.ply
+profile_version: 0.1
+
+meta:
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
 files:
   - file_path: "/placeholder/path/to/your/3dgs_inria_ply_file.ply"
     type: ply
@@ -53,12 +73,3 @@ fields:
     - remapping:
         method: sigmoid
 
-
-scene:
-  primitives: 3DGS-INRIA
-  params:
-    - means
-    - scales
-    - opacities
-    - quaternions
-    - sh
