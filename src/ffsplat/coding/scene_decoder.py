@@ -91,6 +91,9 @@ class SceneDecoder:
                     case {"reshape": {"shape": shape}}:
                         field_data = field_data.reshape(*shape)
 
+                    case {"permute": {"dims": dims}}:
+                        field_data = field_data.permute(*dims)
+
                     case {"remapping": {"method": method}}:
                         match method:
                             case "exp":
