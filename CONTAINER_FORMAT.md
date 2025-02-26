@@ -65,6 +65,8 @@ Finally, we have the **encoder**’s view. For the .ply format these are very st
 
 By describing the building blocks of formats such as 3DGS .ply, .spz or gsplat compression, we hope to enable better tooling, interoperability, and faster iteration for novel methods. When the building blocks are in place, it should become much simpler for a novel representation to create a well-compressible and well-readable format.
 
+**TODO text: this is repeated with the community stuff above**
+
 We attempted to describe gaussian splatting scenes with the gs-container-format, in a file-centric view (github.com/SharkWipf/gaussian-splatting-container-format/). This file-centric view allows the description of what is needed to store on disk, but does not show the steps to decode these files into the scene parameters given to the renderer. This would still be hidden, implementation-specific.
 
 Thus additionally to describing the files stored, we also want to describe explicitly how to decode them into the scene parameters.
@@ -74,6 +76,8 @@ But then, we still require dedicated high-performance decoders, to e.g. open 3DG
 To enable allowing to build decoders for a fixed set of features, like the very stricly specified .spz which doesn’t allow for lots of wiggle room (TODO wording), we require another description: a schema, that allows to specify which features to expect. We can validate our container metadatadescription against such a schema, and then build high-performance decoders.
 
 ## Scene Description Format
+
+**TODO text: this is repeated with the previous section**
 
 To describe radiance field scenes effectively, we need a consistent format that considers different perspectives:
 
@@ -383,20 +387,12 @@ This complete example shows how a standard 3DGS .ply file is decoded into PyTorc
 
 The format can be extended to support other radiance field representations:
 
-### Additional Operations
-
-Future versions may include:
-- **Permute**: To rearrange dimensions of a tensor
-- **Slice**: To extract subsets of data
-- **Quantize/Dequantize**: For compressed representations
-- **Custom Operations**: For specialized processing needs
-
 ### Other Primitives
 
-While the initial focus is on 3DGS, the format can be extended to support:
+While the initial focus is on 3DGS, the format could be extended to support:
 - 2D Gaussians
-- Plenoxels
-- Neural representations (NeRF variants)
+- Radiant Foam
+- Neural representations (NeRF variants), Instant-NGP
 - Hybrid representations
 
 ### Schema Validation
@@ -408,7 +404,7 @@ A schema system will allow:
 
 ## Conclusion
 
-The 3D Gaussian Splatting Container Format provides a flexible, explicit way to describe radiance field scenes and their storage formats. By separating the storage format from the decoding process, we enable:
+The Radiance Field Container Format provides a flexible, explicit way to describe radiance field scenes and their storage formats. By separating the storage format from the decoding process, we enable:
 
 1. Better interoperability between different implementations
 2. Clearer documentation of format specifications
