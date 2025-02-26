@@ -1,14 +1,31 @@
-3D Gaussian Splatting is an exciting method to represent radiance fields. The explicit nature of the list of primitives enables simple editing of scenes. The original implementation stores the primitives as 3D points with attributes in .ply files, with float32 values for each attribute. This takes a lot of space, particularly as there is a large number of spherical harmonics attributes (45), which produces a total of 232 Byte per primitive. This has lead to a welath of research into optimizing the storage, and compressing the 3DGS-based scenes. The research methods can be found in the survey on 3DGS compression: 3DGS.zip.
+# 3D Gaussian Splatting Container Format
 
-These research methods utilize different tools to reduce the size of the number of Gaussians while trying to achieve the same quality (compaction), or trying to compress the resulting primitives, to store them in as little space as possible (compression).
-The research has shown, that combining compaction and compression, we can reduce the total storage size vs vanilla 3DGS ply over 100x. Compaction, in general, is independent of the compression method. We just reduce the number of primitives, yielding usually linear storage space reduction, relative to the number or primitves reduced.
-In the compression research, different tools are presented, but often the methods share similarities, or build from the same concepts or building blocks, like vector quantization.
-To make 3DGS methods be used in real-world, we need to have formats that are widely supported by both training methods and renderers and interactive editors. In this regard, we have:
-- original 3DGS .ply format
-- SuperSplat .splat
-- Niantic .spz
+## Introduction
+
+3D Gaussian Splatting (3DGS) is an exciting method for representing radiance fields. The explicit nature of the primitive list enables simple scene editing. The original implementation stores these primitives as 3D points with attributes in `.ply` files, using `float32` values for each attribute. This consumes significant space, particularly due to the large number of spherical harmonics attributes (45), resulting in 232 bytes per primitive. This has led to a wealth of research into optimizing storage and compressing 3DGS-based scenes. These research methods can be found in the survey on 3DGS compression: **3DGS.zip**.
+
+## Compression Methods
+
+These research methods utilize different approaches:
+
+1. **Compaction**: Reducing the number of Gaussians while maintaining similar quality
+2. **Compression**: Compressing the resulting primitives to minimize storage requirements
+
+Research has shown that combining compaction and compression can reduce total storage size by over 100x compared to vanilla 3DGS PLY format. Compaction generally yields linear storage space reduction relative to the number of primitives reduced.
+
+In compression research, different tools are presented, but methods often share similarities or build upon the same concepts and building blocks, such as vector quantization.
+
+## Current Formats
+
+To make 3DGS methods usable in real-world applications, we need formats widely supported by training methods, renderers, and interactive editors. Currently available formats include:
+
+- Original 3DGS `.ply` format
+- SuperSplat `.splat`
+- Niantic `.spz`
 - gsplat compressed SOG
-Standardization efforts are underway to integrate 3DGS into .gltf.
+
+Standardization efforts are underway to integrate 3DGS into `.gltf`.
+
 3DGS is the most popular method that has seen a wide adoption through research, and starting to see adoption in industry. Meanwhile, there have sprung up variants that modify the splat representation (like 2DGS), modify the rendering of primitives (EVER, 3DGRT), or propose different non-splat based alternatives for radiance fields, which are still explicit. There we have plenoxels, a method that preceeds 3DGS, and the recent works RadFoam and SVRaster. Finally, there’s the neural and implicit Radiance Field methods, such as Zip-NeRF and Instant NGP.
 Research papers often produce single-use formats that try to demonstrate an idea, while not looking for usability and interoperability. With users of the technology missing out on the latest developments.
 Our goal here is to provide a format that allows the description of radiance fields pipelines and their storage, to allow a common language and baseline.
@@ -38,78 +55,346 @@ This should allow us to build decoders in dynamic languages such as Python, whic
 But then, we still require dedicated high-performance decoders, to e.g. open 3DGS scenes in editors and viewers.
 To enable allowing to build decoders for a fixed set of features, like the very stricly specified .spz which doesn’t allow for lots of wiggle room (TODO wording), we require another description: a schema, that allows to specify which features to expect. We can validate our container metadatadescription against such a schema, and then build high-performance decoders.
 
+## Scene Description Format
 
-To summarize, we want to create a format to describe the parts requried to render a radiance field. How they are stored, what they are, and how they are processed into something given to a particular renderer.
-We choose to use YAML as our description format, which is human readable, machine readable, and allows us store store lists and dictionaries in a simple way, while not requiring quotes for either string keys or values.
+To describe radiance field scenes effectively, we need a consistent format that considers different perspectives:
 
-We will store this metadata next to the stored compressed files. We can then zip up the folder with all the content (either with actual compression or just zip storage if the contained files are already compressed data like PNG), and give it a custom file ending, and MIME type (see .spz github issue #20).
+1. **Renderer's View**: Requires data to produce output images given camera parameters. For 3DGS, this means a list of splats with their attributes.
 
-Proposed file ending: .smurfx (Smashingly Marvellous Universal Radiance Field eXchange)
+2. **Storage View**: Defines how data is stored in files. For example, 3DGS uses `.ply` files where attributes like position coordinates "x", "y", "z" are stored separately but become "means" for the renderer. Similarly, spherical harmonics are split into `f_rest_0` through `f_rest_44` attributes.
 
-In this format, we should describe general information: a container identifier, the container version, what software was used to create this container (the packer). The packer version can be part of its name. We do not want to specify it separately, as we do not want the decoder to depend on particular packer versions. It should be there for informational purposes of the user, but all information required for decoding MUST come from the other fields.
+3. **Decoder's View**: Describes how to read files and process them into renderer-compatible format. This includes combining xyz coordinates into means and applying transformations like sigmoid to opacity values.
 
-We then provide a profile that tells us what kind of data and processing steps to expect. This can be something like „3DGS-INRIA.ply“, or „.spz“, or „SOG-web“. The profile gets a version as well, to be able to evolve in the future.
+4. **Encoder's View**: Outlines the steps to process scene data into storage formats. For compression methods like Self-Organizing Gaussians, this involves sorting operations, vector quantization, and image compression with scene-specific parameters.
 
-Next, we describe the list of files stored in this container. For .ply format, this is a single descriptor giving us the file name, its type, and how we name the data extracted from it.
+## Format Goals
 
-- file_name:
+Our goals with this format are to:
+
+1. Make format details explicit and visible rather than hidden in code or technical reports
+2. Enable better tooling and interoperability between different methods
+3. Support faster iteration for novel representation methods
+4. Provide clear descriptions for both file storage and decoding steps
+
+Previously, we attempted to describe gaussian splatting scenes with the gs-container-format using a file-centric approach. While this described what to store on disk, it didn't explain how to decode these files into scene parameters for rendering.
+
+We now aim to explicitly describe both the storage format and the decoding process to enable:
+
+- Building flexible decoders in languages like Python that can handle different formats
+- Creating dedicated high-performance decoders for specific formats
+- Validating container metadata against schemas for consistency
+
+## YAML Metadata Format
+
+We use YAML to describe the components required to render a radiance field, as it is:
+
+- Human-readable
+- Machine-readable
+- Capable of storing lists and dictionaries simply
+- Doesn't require quotes for string keys or values
+
+The metadata file is stored alongside compressed files. The entire package (metadata plus data files) can be zipped (either with compression or just storage if files are already compressed like PNG) and given a custom file extension and MIME type.
+
+**Proposed file extension**: `.smurfx` (Smashingly Marvellous Universal Radiance Field eXchange)
+
+## Container Structure
+
+A container metadata file includes:
+
+1. **General information**:
+   - Container identifier
+   - Container version
+   - Packer (software used to create the container)
+
+2. **Profile**:
+   - Format type (e.g., "3DGS-INRIA.ply", ".spz", or "SOG-web")
+   - Profile version
+
+3. **Files**:
+   - List of files in the container with their types and field naming conventions
+
+For example, a simple 3DGS .ply file entry might look like:
+
+```yaml
+- file_path: "/path/to/file.ply"
   type: ply
   field_prefix: point_cloud.ply@
+```
 
-This would tell a decoder to read this .ply file, take all the containing data attached to vertices, and make them available as fields with a prefix. We could also specify each field explicitly (e.g. for INRIA 3DGS „x“, „y“, „z“, „scale_0“, „scale_1“, …). This would have the upside of being a more explicit desciption, but adds a lot of information to the YAML, which becomes harder to parse for humans. A 3DGS INRIA .ply contains 61 attributes, which is a very long string list. We choose the description of prefix, which will allow the ply file reader to provide each of these with a prefix for further processing, e.g. point_cloud.ply@x for „x“.
+As seen in the `3DGS_INRIA_ply_decoding_template.yaml` example, this tells the decoder to read the PLY file and make all vertex attributes available as fields with the specified prefix.
 
-TODO: these are only the „vertex“ datat attributes from .ply, for INRIA 3DGS support. Make that explicit somehow in the ply description? We can have other data in ply as well, like face data, metadata?
+4. **Fields**:
+   - Describes how to process and transform data into final scene parameters
 
-Another example entry for the files list could be an image, for SOG:
-TODO add means.png example
+5. **Scene**:
+   - Specifies the primitive type and required parameters for rendering
 
-Next, we describe how the data recovered from these files is processed and transformed, into the final scene parameters, which are given to the renderer.
+## Operations
 
+To support the standard 3DGS `.ply` format, the following operations are needed:
 
-We use notation that is straightforward to translate into operations on PyTorch tensors. This is the common ground in which nearly all radiance field methods are written in currently, thus the community should be immediately familiar with these terms. They are also expressive enough to write dedicated decoders in e.g. WebGL / WebGPU shaders (RFQ: does this create any headaches?).
+### Operation Types
 
-To support the standard .ply of 3DGS, we need to support the following operations:
+The operations in our format reflect different types of data transformations that occur during decoding:
 
-Combine: combine several named fields into a new one. We need to support stacking fields, like f_dc_0, f_dc_1, f_dc_2 into f_dc [N x 3]. We need to support concat, e.g. f_dc [ N x 1 x 3] and f_rest [N x 15 x 3] into sh [N x 16 x 3]. The difference is that stack allows to stack them into a new dimension, where every input element has the same shape, while concat allows to stack them in an existing dimension, where the input elements have differing shapes. (NB: stacking could thus be described as adding a new dimension to all the input fields, follow by a concat. But that would require for our f_rest fields, to specify 44x that a new dimension should be added to each of the f_rest_x fields. Having a dedicated stack operation simplifies this).
-As the input fields, we either specify a list of names, e.g. [f_dc, f_rest], or a prefix, which requires the decoder to take all the fields whose names start with this prefix, e.g. point_cloud.ply@f_rest_.
+- **Remapping**: 1 field → 1 field (transforms values in a field)
+- **Concat/Stack**: N fields → 1 field (combines multiple fields into one)
+- **Split**: 1 field → N fields (opposite of concat, separates a field)
+- **Lookup**: 2 fields → 1 field (uses one field to look up values in another)
+- **File decoders**:
+  - PLY decoder: 1 file → N fields (extracts multiple attributes)
+  - SOG PNG: 1 file → 1 field (converts image data to tensor)
 
-Operation order: the list of operations needs to be processed by the decoder from top to bottom to produce the output.
-Field order: the fields need to be processed from top to bottom, which ensures that all fields that are required in the next steps already exist.
-TODO: how will this be specified for the container format? It would also be possible to build a tree of dependencies to resolve the fields required for each operation and process them dependently. But this puts a large burden on the decoder implementation.
+It's difficult to map all operations into a single category since operations can have one or multiple inputs and one or multiple outputs. This is the motivation for having both a files view (how data is stored) and an operations view (how data is processed).
 
-Continuing with the combination operation: for stacking and concat, we need to specify which dimension the operations happens in. And we have a parameter in the combinatoin op that lets us swich between stack or concat.
+### Combine Operation
 
-The next operation is reshape: we reshape the tensor into a target shape. A single dimension may be -1, in which case it’s inferred from the remaining dimensions and the number of elements in the input.
+This operation merges multiple fields into a single output field. There are two methods:
 
-Alternative to combination, we need to specify a from_field operation, that takes another named field as input, for processing, e.g. from_field: point_cloud.ply@opacity.
+1. **Stack**: Creates a new dimension and stacks fields along it. For example, stacking `f_dc_0`, `f_dc_1`, and `f_dc_2` into `f_dc [N x 3]`. 
 
-Finally for .ply, we require a remapping operation, which applies one of a predefined set of functions.
-In 3DGS, an exponential activation is used for scaling atributes, and a sigmoid activation is used for the opacity. Thus we create a remapping op, with method either „exp“ or „sigmoid“.
+2. **Concat**: Combines fields along an existing dimension. For example, concatenating `f_dc [N x 1 x 3]` and `f_rest [N x 15 x 3]` into `sh [N x 16 x 3]`.
 
-Another entry of the container metadata is a „scene“ field. Here we describe what primitives we expect, and what parameters exist. Not all fields from the decoding process may be required at the rendering stage. Only the ones listed in params need to be given to the renderer, the rest can be discarded. (Optionally an implementation may want to keep them around).
+Input fields can be specified in two ways:
+- As a list of names: `from_field_list: [f_dc, f_rest]`
+- Using a prefix: `from_fields_with_prefix: point_cloud.ply@f_rest_`
 
-With these building blocks, we can now describe a .ply file:
-TODO add exmaple ply YAML
+From the `3DGS_INRIA_ply_decoding_template.yaml` example:
 
-This file is short enough to be well readable, yet contains an explicit description of how to decode the .ply file into scene parameters.
+```yaml
+f_dc:
+  - combine:
+      from_fields_with_prefix: point_cloud.ply@f_dc_
+      method: stack
+      dim: 1
+  - reshape:
+      shape: [-1, 1, 3]
+```
 
+### Reshape Operation
 
+This operation changes the dimensions of a tensor. A dimension value of -1 means it will be automatically calculated based on the total number of elements.
 
-The 3DGS pipeline
-The training view: attribute buffers, initialized from SfM, get concatted, their activation methods applied, handed to the renderer. In a backward pass, we apply the inverse of the activation methods.
-The decoding view: bitstreams get decoded into buffers, the rest is similar to the forward pass in training.
-The encoding view: we take the scene parameters, and run algorithms that produce new buffers or indices. In stages, we perform the same methods as the backward pass (e.g. the inverse activation methods).
+```yaml
+reshape:
+  shape: [-1, 1, 3]
+```
 
-Lifecycle of 3DGS attributes.
-- initialization from SfM
-- setup of a training pipeline: forward pass with activations, rendering, backward pass with inverse activations
-- setup of an encoding pipeline: we take the final buffers from training, run the training forward pass. this produces scene parameters. we then run a novel encoding pipeline, which is not identical to the training backward pass, but runs in the same direction. we store the encoded files.
-then, for rendering, we load the container, and setup a decoding pipeline. this is similar to a backward pass of the encoding pipeline, but has potentially fewer steps total. this produces scene parameters, which we give to the renderer.
-if we want to finetune or continue training on these results, we need to set up yet another pipeline. this could be identical to parts of the decoding pipeline, but is not required to. if we want to set up a different pipeline, we need a backward / encoding pass.
-TODO: provide a diagram / flowchart
+### From_field Operation
 
-The goal of the ffsplat tool, is to
-- allow decoding of different RF files into a PyTorch representation, which can be rendered
-- allow encoding PyTorch representations into dedicated formats, described with .smurfx metadata
-- allow conversion between different formats
-- provide a core primitves implementation for Gaussians, which can be used by different Python-based implementations, to read, write, and processes Gaussians, before handing them off to the renderer. this is usually custom built in each repository, but could be shared this way.
+This operation copies data from another named field for further processing:
+
+```yaml
+opacities: 
+  - from_field: point_cloud.ply@opacity
+  - remapping:
+      method: sigmoid
+```
+
+### Remapping Operation
+
+Applies a mathematical function to transform field values:
+
+- `exp`: Exponential function for scaling attributes
+- `sigmoid`: Sigmoid function for opacity values
+
+Example from the template:
+
+```yaml
+scales:
+  - combine:
+      from_fields_with_prefix: point_cloud.ply@scale_
+      method: stack
+      dim: 1
+  - remapping:
+      method: exp
+```
+
+### Operation Processing Order
+
+Operations are processed sequentially from top to bottom for each field. The field processing itself follows the order defined in the metadata file.
+
+> Note: A simple decoding example in Python may be added later to demonstrate how these operations are implemented in code.
+
+## Scene Representation
+
+The `scene` section in the metadata file defines what primitives we expect and their required parameters:
+
+```yaml
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+```
+
+These parameters are used to create the appropriate scene representation object that can be passed to a renderer.
+
+## 3DGS Pipeline and Lifecycle
+
+The 3DGS pipeline can be viewed from different perspectives:
+
+### Training Pipeline
+
+1. **Initialization**: Attribute buffers are initialized from Structure from Motion (SfM)
+2. **Forward Pass**: Attributes are concatenated, activation functions applied, and passed to renderer
+3. **Backward Pass**: Inverse activation methods are applied for optimization
+
+### Encoding Pipeline
+
+1. **Input**: Final trained buffers are processed with the training forward pass
+2. **Encoding**: Novel encoding algorithms produce optimized buffers/indices 
+3. **Storage**: The encoded files are stored with metadata
+
+### Decoding Pipeline
+
+1. **Input**: Container with encoded files and metadata is loaded
+2. **Processing**: Files are decoded into raw field data and transformed according to the field operations
+3. **Output**: Scene parameters ready for the renderer
+
+> Note: A simple implementation example showing these pipeline steps may be added later.
+
+## ffsplat Tool Functionality
+
+The ffsplat tool provides a comprehensive solution for working with 3D Gaussian Splatting formats:
+
+1. **Decoding**: Convert various RF formats into PyTorch tensors for rendering
+2. **Encoding**: Convert PyTorch representations into efficient storage formats
+3. **Format Conversion**: Transform between different 3DGS formats
+4. **Core Primitives**: Shared implementation of Gaussian primitives for Python-based applications
+
+This enables a unified approach to handling various radiance field formats while maintaining interoperability between different implementations.
+
+## Complete Format Example
+
+Let's look at a complete example of the 3DGS INRIA PLY format description from `3DGS_INRIA_ply_decoding_template.yaml`:
+
+```yaml
+container_identifier: smurfx
+container_version: 0.1
+
+# this is a template file for .ply files without any metadata
+packer: unknown
+
+profile: 3DGS-INRIA.ply
+profile_version: 0.1
+
+meta:
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+files:
+  - file_path: "/placeholder/path/to/your/3dgs_inria_ply_file.ply"
+    type: ply
+    field_prefix: point_cloud.ply@
+
+fields:
+  f_dc:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@f_dc_
+        method: stack
+        dim: 1
+    - reshape:
+        shape: [-1, 1, 3]
+  
+  f_rest:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@f_rest_
+        method: stack
+        dim: 1
+    - reshape:
+        shape: [-1, 15, 3]
+
+  sh:
+    - combine:
+        from_field_list: [f_dc, f_rest]  
+        method: concat
+        dim: 1
+
+  quaternions:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@rot_
+        method: stack
+        dim: 1
+
+  means:
+    - combine:
+        from_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+        method: stack
+        dim: 1
+  
+  scales:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@scale_
+        method: stack
+        dim: 1
+    - remapping:
+        method: exp
+  
+  opacities: 
+    - from_field: point_cloud.ply@opacity
+    - remapping:
+        method: sigmoid
+```
+
+This complete example shows how a standard 3DGS .ply file is decoded into PyTorch tensors ready for rendering. The following operations are performed:
+
+1. The decoder reads the .ply file, extracting all vertex attributes with the prefix `point_cloud.ply@`.
+2. The fields are processed according to their operations:
+   - Position coordinates (x, y, z) are stacked to form the `means` tensor.
+   - Scale values are stacked and then exponentiated.
+   - Rotation values are stacked to form quaternions.
+   - Color data is processed in two parts:
+     - Base colors (`f_dc_0`, `f_dc_1`, `f_dc_2`) are stacked and reshaped.
+     - Higher-order spherical harmonics (`f_rest_0` through `f_rest_44`) are stacked and reshaped.
+     - These are then concatenated to form the complete `sh` tensor.
+   - Opacity values are transformed with a sigmoid function.
+3. Finally, the processed fields are used to create a `Gaussians` object ready for rendering.
+
+## Extensions and Future Work
+
+The format can be extended to support other radiance field representations:
+
+### Additional Operations
+
+Future versions may include:
+- **Permute**: To rearrange dimensions of a tensor
+- **Slice**: To extract subsets of data
+- **Quantize/Dequantize**: For compressed representations
+- **Custom Operations**: For specialized processing needs
+
+### Other Primitives
+
+While the initial focus is on 3DGS, the format can be extended to support:
+- 2D Gaussians
+- Plenoxels
+- Neural representations (NeRF variants)
+- Hybrid representations
+
+### Schema Validation
+
+A schema system will allow:
+- Validation of container metadata
+- Feature detection for decoders
+- Standardized extensions
+
+## Conclusion
+
+The 3D Gaussian Splatting Container Format provides a flexible, explicit way to describe radiance field scenes and their storage formats. By separating the storage format from the decoding process, we enable:
+
+1. Better interoperability between different implementations
+2. Clearer documentation of format specifications
+3. Faster development of new compression techniques
+4. Simplified sharing of 3D scenes across platforms
+
+The ffsplat tool implements this format, providing a unified approach to handling various radiance field formats while maintaining compatibility with existing workflows.
