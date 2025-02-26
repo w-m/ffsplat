@@ -39,33 +39,29 @@ To make 3DGS methods usable in real-world applications, we need formats widely s
 - [Niantic `.spz`](https://scaniverse.com/spz)
 - [gsplat compressed SOG](https://docs.gsplat.studio/main/apis/compression.html)
 
-
-
-3DGS is the most popular radiance field method and has seen a wide adoption through research, and starting to see adoption in industry. Meanwhile, there have sprung up variants that modify the splat representation (like [2DGS](https://surfsplatting.github.io)), modify the rendering of primitives ([EVER](https://half-potato.gitlab.io/posts/ever/), [3DGRT](https://gaussiantracer.github.io)), or propose different non-splat based alternatives for radiance fields, which are still explicit. There we have [Plenoxels](https://alexyu.net/plenoxels/), a method that preceeds 3DGS, and the recent works [RadFoam](https://radfoam.github.io) and [SVRaster](https://svraster.github.io). Finally, there’s the neural and implicit Radiance Field methods, such as [Zip-NeRF](https://jonbarron.info/zipnerf/) and [Instant NGP](https://github.com/NVlabs/instant-ngp).
+3DGS is the most popular radiance field method and has seen a wide adoption through research, and starting to see adoption in industry. Meanwhile, there have sprung up variants that modify the splat representation (like [2DGS](https://surfsplatting.github.io)), modify the rendering of primitives ([EVER](https://half-potato.gitlab.io/posts/ever/), [3DGRT](https://gaussiantracer.github.io)), or propose different non-splat based alternatives for radiance fields, which are still explicit. There we have [Plenoxels](https://alexyu.net/plenoxels/), a method that preceeds 3DGS, and the recent works [RadFoam](https://radfoam.github.io) and [SVRaster](https://svraster.github.io). Finally, there's the neural and implicit Radiance Field methods, such as [Zip-NeRF](https://jonbarron.info/zipnerf/) and [Instant NGP](https://github.com/NVlabs/instant-ngp).
 
 Research papers often produce single-use formats that try to demonstrate an idea, while not looking for usability and interoperability. Which leads to users of the technology missing out on the latest developments.
 Our goal here is to provide a format that allows the description of radiance fields pipelines and their storage, to allow a common language and baseline.
-We will start with an explicit description of the .ply format used in 3DGS. Next, we’ll describe a compressed 3DGS format based on [Self-Organizing Gaussians (SOG)](https://fraunhoferhhi.github.io/Self-Organizing-Gaussians/), which uses standard image codecs to store the attributes, which makes it simple to be decoded in any software, even web browsers.
+We will start with an explicit description of the .ply format used in 3DGS. Next, we'll describe a compressed 3DGS format based on [Self-Organizing Gaussians (SOG)](https://fraunhoferhhi.github.io/Self-Organizing-Gaussians/), which uses standard image codecs to store the attributes, which makes it simple to be decoded in any software, even web browsers.
 
 It is currently impossible to see which radiance field method will have the widest adoption in a few years. Thus many in the industry are hesitant to proceed with standardization (see the 3DGS Townhall by the MSF). But we hope this proposal helps the community if formalize some of the descriptions, bringing clarity to current storage options, and allow novel methods to be compressable with little additional work.
 
-## Vantage points
+## Vantage points and Scene Description Format
 
-To describe a radiance field (RF) scene, we need to know what method to use to render the scene, and then we need the data inputs to render it. For NeRF-methods, these would be the network weights. For 3DGS & friends, this is the list of primitives, each with attributes such as means, scales, rotations, opacity and color.
+To describe a radiance field (RF) scene effectively, we need a consistent format that considers different perspectives or vantage points:
 
-Describing a radiance field, there are different vantage points, or users. We have the **renderer** - it requires the data to produce an output image, given some camera parameters. For 3DGS, this is the list of splatting primitives with their attributes. The renderer takes the primitives and a camera configuration, and produces the splats, then blends them into the final output image.
+1. **Renderer's View**: Requires data to produce an output image given camera parameters. For 3DGS, this means a list of splatting primitives with their attributes. The renderer takes the primitives and a camera configuration, and produces the splats, then blends them into the final output image.
 
-We have the **storage view**: how is this data being put into files - think .ply for 3DGS. Here, we have a single file storing all the splats, but with different names for the attributes, e.g. „x“, „y“ and „z“ are held seperate, which become „means“ for the renderer. Also the spherical harmonics are split into f_rest_0, f_rest_1 .. f_rest_44 attributes in the ply.
+2. **Storage View**: Defines how data is stored in files. For example, 3DGS uses `.ply` files where attributes like position coordinates "x", "y", "z" are stored separately but become "means" for the renderer. Similarly, spherical harmonics are split into `f_rest_0` through `f_rest_44` attributes.
 
-Then we have a **decoder** view: we need a description that allows us to read the files, and process them into something that can be given to the renderer. This requires description on how to combine xyz into means, and how to scale the opacity values (e.g. with a sigmoid function).
+3. **Decoder's View**: Describes how to read files and process them into renderer-compatible format. This includes combining xyz coordinates into means and applying transformations like sigmoid to opacity values.
 
-Finally, we have the **encoder**’s view. For the .ply format these are very straightforward steps: take the scene parameters, split them into individual one-dimensional lists, store in .ply. For more involved compression methods such as *Self-Organizing Gaussians (SOG)*, we need to do processing to arrive at some storage values. This can involve computationally intensive sorting operations, building vector quantizations, and image compression methods. All these steps have parameters that need to be tweaked per scene, which we need to somehow determine at compression time. The final format does not need to know about these, but may still want to keep them as metadata, to reproduce these results. The encoder also needs to produce the description that is found by the decoder to produce a renderable representation - the scene parameters.
+4. **Encoder's View**: Outlines the steps to process scene data into storage formats. For the .ply format these are very straightforward steps: take the scene parameters, split them into individual one-dimensional lists, store in .ply. For compression methods like Self-Organizing Gaussians, this involves sorting operations, vector quantization, and image compression with scene-specific parameters. All these steps have parameters that need to be tweaked per scene, which we need to somehow determine at compression time. The final format does not need to know about these, but may still want to keep them as metadata, to reproduce these results.
 
 **Usually the details of each format are somewhat hidden in code or in a technical report. Our goal is to make these details explicit and visible. This includes both storage and the processing required to decode the stored files back into scene parameters.**
 
 By describing the building blocks of formats such as 3DGS .ply, .spz or gsplat compression, we hope to enable better tooling, interoperability, and faster iteration for novel methods. When the building blocks are in place, it should become much simpler for a novel representation to create a well-compressible and well-readable format.
-
-**TODO text: this is repeated with the community stuff above**
 
 We attempted to describe gaussian splatting scenes with the gs-container-format, in a file-centric view (github.com/SharkWipf/gaussian-splatting-container-format/). This file-centric view allows the description of what is needed to store on disk, but does not show the steps to decode these files into the scene parameters given to the renderer. This would still be hidden, implementation-specific.
 
@@ -73,21 +69,7 @@ Thus additionally to describing the files stored, we also want to describe expli
 
 This should allow us to build decoders in dynamic languages such as Python, which can decode a whole set of different formats.
 But then, we still require dedicated high-performance decoders, to e.g. open 3DGS scenes in editors and viewers.
-To enable allowing to build decoders for a fixed set of features, like the very stricly specified .spz which doesn’t allow for lots of wiggle room (TODO wording), we require another description: a schema, that allows to specify which features to expect. We can validate our container metadatadescription against such a schema, and then build high-performance decoders.
-
-## Scene Description Format
-
-**TODO text: this is repeated with the previous section**
-
-To describe radiance field scenes effectively, we need a consistent format that considers different perspectives:
-
-1. **Renderer's View**: Requires data to produce output images given camera parameters. For 3DGS, this means a list of splats with their attributes.
-
-2. **Storage View**: Defines how data is stored in files. For example, 3DGS uses `.ply` files where attributes like position coordinates "x", "y", "z" are stored separately but become "means" for the renderer. Similarly, spherical harmonics are split into `f_rest_0` through `f_rest_44` attributes.
-
-3. **Decoder's View**: Describes how to read files and process them into renderer-compatible format. This includes combining xyz coordinates into means and applying transformations like sigmoid to opacity values.
-
-4. **Encoder's View**: Outlines the steps to process scene data into storage formats. For compression methods like Self-Organizing Gaussians, this involves sorting operations, vector quantization, and image compression with scene-specific parameters.
+To enable allowing to build decoders for a fixed set of features, like the very stricly specified .spz which doesn't allow for lots of wiggle room, we require another description: a schema, that allows to specify which features to expect. We can validate our container metadatadescription against such a schema, and then build high-performance decoders.
 
 ## Format Goals
 
@@ -97,8 +79,6 @@ Our goals with this format are to:
 2. Enable better tooling and interoperability between different methods
 3. Support faster iteration for novel representation methods
 4. Provide clear descriptions for both file storage and decoding steps
-
-Previously, we attempted to describe gaussian splatting scenes with the gs-container-format using a file-centric approach. While this described what to store on disk, it didn't explain how to decode these files into scene parameters for rendering.
 
 We now aim to explicitly describe both the storage format and the decoding process to enable:
 
