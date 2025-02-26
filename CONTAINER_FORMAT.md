@@ -2,7 +2,7 @@
 
 ## Introduction
 
-3D Gaussian Splatting (3DGS) is an exciting method for representing radiance fields. The explicit nature of the primitive list enables simple scene editing. The original implementation stores these primitives as 3D points with attributes in `.ply` files, using `float32` values for each attribute. This consumes significant space, particularly due to the large number of spherical harmonics attributes (45), resulting in 232 bytes per primitive. This has led to a wealth of research into optimizing storage and compressing 3DGS-based scenes. These research methods can be found in the survey on 3DGS compression: **3DGS.zip**.
+3D Gaussian Splatting (3DGS) is an exciting method for representing radiance fields. The explicit nature of the list of primitives enables simple scene editing, which implicit or neural methods like Neural Radiance Fields (NeRFs) can't provide. The original implementation by INRIA stores these primitives as 3D points with attributes in `.ply` files, using `float32` values for each attribute. This consumes significant space, particularly due to the large number of spherical harmonics attributes (45), resulting in 232 bytes total per primitive, and Gigabyte-sized files for simple scenes. This has led to a wealth of research into optimizing storage and compressing 3DGS-based scenes. An overview over research directions can be found in this survey paper: [*3DGS.zip: A survey on 3D Gaussian Splatting Compression Methods*](https://w-m.github.io/3dgs-compression-survey/) (Bagdasarian et. al.).
 
 ## Compression Methods
 
@@ -11,9 +11,24 @@ These research methods utilize different approaches:
 1. **Compaction**: Reducing the number of Gaussians while maintaining similar quality
 2. **Compression**: Compressing the resulting primitives to minimize storage requirements
 
-Research has shown that combining compaction and compression can reduce total storage size by over 100x compared to vanilla 3DGS PLY format. Compaction generally yields linear storage space reduction relative to the number of primitives reduced.
+Research has shown that combining compaction and compression can reduce total storage size by over 100x compared to vanilla 3DGS PLY format. Compaction generally yields linear storage space reduction relative to the number of primitives reduced, and is mostly independent of the chosen compression format, so it is not a focus point here.
 
-In compression research, different tools are presented, but methods often share similarities or build upon the same concepts and building blocks, such as vector quantization.
+In compression research, different tools and ideas are presented, but methods often share similarities or build upon the same concepts and building blocks, such as vector quantization.
+
+## Community progress towards a universal 3DGS format
+
+The 3DGS community has been [discussing](https://github.com/mkkellogg/GaussianSplats3D/issues/47) to standardize a universal format, but has not reached a consensus yet.
+
+Standardization efforts are underway to [integrate 3DGS into `.gltf`](https://github.com/KhronosGroup/glTF/issues/2454).
+
+A townhall on 3DGS Standardization was held by the Metavision Standards Forum, with [slides](https://metaverse-standards.org/presentations-videos/#msf_presentations) and [video recording](https://youtu.be/0xdPpKSkO3I) available.
+
+A [Gaussian Splatting Container Format](https://github.com/SharkWipf/gaussian-splatting-container-format) was discussed by the MrNeRF community on Discord around late 2024. This proposal is an evolution of this work. Through trying to build an implementation of the format, we extended the original proposal with the ideas of adding the field pipeline description to the metadata.
+
+Discussions of this proposal are happening in the MrNeRF & Brush Discord channel #gs-container-format. Feedback and active participation is welcome.
+
+[![](https://dcbadge.limes.pink/api/server/https://discord.gg/TbxJST2BbC)](https://discord.gg/TbxJST2BbC)
+
 
 ## Current Formats
 
@@ -21,29 +36,32 @@ To make 3DGS methods usable in real-world applications, we need formats widely s
 
 - Original 3DGS `.ply` format
 - SuperSplat `.splat`
-- Niantic `.spz`
-- gsplat compressed SOG
+- [Niantic `.spz`](https://scaniverse.com/spz)
+- [gsplat compressed SOG](https://docs.gsplat.studio/main/apis/compression.html)
 
-Standardization efforts are underway to integrate 3DGS into `.gltf`.
 
-3DGS is the most popular method that has seen a wide adoption through research, and starting to see adoption in industry. Meanwhile, there have sprung up variants that modify the splat representation (like 2DGS), modify the rendering of primitives (EVER, 3DGRT), or propose different non-splat based alternatives for radiance fields, which are still explicit. There we have plenoxels, a method that preceeds 3DGS, and the recent works RadFoam and SVRaster. Finally, there’s the neural and implicit Radiance Field methods, such as Zip-NeRF and Instant NGP.
-Research papers often produce single-use formats that try to demonstrate an idea, while not looking for usability and interoperability. With users of the technology missing out on the latest developments.
+
+3DGS is the most popular radiance field method and has seen a wide adoption through research, and starting to see adoption in industry. Meanwhile, there have sprung up variants that modify the splat representation (like [2DGS](https://surfsplatting.github.io)), modify the rendering of primitives ([EVER](https://half-potato.gitlab.io/posts/ever/), [3DGRT](https://gaussiantracer.github.io)), or propose different non-splat based alternatives for radiance fields, which are still explicit. There we have [Plenoxels](https://alexyu.net/plenoxels/), a method that preceeds 3DGS, and the recent works [RadFoam](https://radfoam.github.io) and [SVRaster](https://svraster.github.io). Finally, there’s the neural and implicit Radiance Field methods, such as [Zip-NeRF](https://jonbarron.info/zipnerf/) and [Instant NGP](https://github.com/NVlabs/instant-ngp).
+
+Research papers often produce single-use formats that try to demonstrate an idea, while not looking for usability and interoperability. Which leads to users of the technology missing out on the latest developments.
 Our goal here is to provide a format that allows the description of radiance fields pipelines and their storage, to allow a common language and baseline.
-We will start with an explicit description of the .ply format used in 3DGS. Next, we’ll describe a compressed 3DGS format based on Self-Organizing Gaussians, which uses PNG images to store the attributes, which makes it simple to be decoded in any software, even web browsers.
+We will start with an explicit description of the .ply format used in 3DGS. Next, we’ll describe a compressed 3DGS format based on [Self-Organizing Gaussians (SOG)](https://fraunhoferhhi.github.io/Self-Organizing-Gaussians/), which uses standard image codecs to store the attributes, which makes it simple to be decoded in any software, even web browsers.
 
-It is currently impossible to see which radiance field method will have the widest adoption in a few years. But we hope it helps the community if formalize some of the descriptions to cut through the noise.
+It is currently impossible to see which radiance field method will have the widest adoption in a few years. Thus many in the industry are hesitant to proceed with standardization (see the 3DGS Townhall by the MSF). But we hope this proposal helps the community if formalize some of the descriptions, bringing clarity to current storage options, and allow novel methods to be compressable with little additional work.
 
-To describe a radiance field scene, we need to know what method to use to render the scene, and then we need the data inputs to render it. For NeRF-methods, these would be the network weights. For 3DGS, this is the list of primitives, each with attributes such as means, scales, rotations, opacity and color.
+## Vantage points
 
-Describing a RF, there are different vantage points, or users. We have the renderer - it requires the data to produce an output image, given some camera parameters. For 3DGS, this is the list of splats with their attributes.
+To describe a radiance field (RF) scene, we need to know what method to use to render the scene, and then we need the data inputs to render it. For NeRF-methods, these would be the network weights. For 3DGS & friends, this is the list of primitives, each with attributes such as means, scales, rotations, opacity and color.
 
-We have the storage view: how is this data being put into files - think .ply for 3DGS. Here, we have a single file storing all the splats, but with different names for the attributes, e.g. „x“, „y“ and „z“ are held seperate, which become „means“ for the renderer. Also the spherical harmonics are split into f_rest_0, f_rest_1 .. f_rest_44 attributes in the ply.
+Describing a radiance field, there are different vantage points, or users. We have the **renderer** - it requires the data to produce an output image, given some camera parameters. For 3DGS, this is the list of splatting primitives with their attributes. The renderer takes the primitives and a camera configuration, and produces the splats, then blends them into the final output image.
 
-Then we have a decoder view: we need a description that allows us to read the files, and process them into something that can be given to the renderer. This requires description on how to combine xyz into means, and how to scale the opacity values (e.g. with a sigmoid function).
+We have the **storage view**: how is this data being put into files - think .ply for 3DGS. Here, we have a single file storing all the splats, but with different names for the attributes, e.g. „x“, „y“ and „z“ are held seperate, which become „means“ for the renderer. Also the spherical harmonics are split into f_rest_0, f_rest_1 .. f_rest_44 attributes in the ply.
 
-Finally, we have the encoder’s view. For the .ply format these are very straightforward steps. For more involved compression methods such as Self-Organizing Gaussians, we need to do processing to arrive at some storage values. This can involve computationally intensive sorting operations, building vector quantizations, and image compression methods. All these steps have parameters that need to be tweaked per scene, which we need to somehow determine at compression time. The final format does not need to know about these, but may still want to keep them as metadata, to reproduce these results. The encoder also needs to produce the description that is found by the decoder to produce a renderable representation - the scene parameters.
+Then we have a **decoder** view: we need a description that allows us to read the files, and process them into something that can be given to the renderer. This requires description on how to combine xyz into means, and how to scale the opacity values (e.g. with a sigmoid function).
 
-Usually the details of each format are somewhat hidden in code or in a technical report. Our goal is to make these details explicit and visible.
+Finally, we have the **encoder**’s view. For the .ply format these are very straightforward steps: take the scene parameters, split them into individual one-dimensional lists, store in .ply. For more involved compression methods such as *Self-Organizing Gaussians (SOG)*, we need to do processing to arrive at some storage values. This can involve computationally intensive sorting operations, building vector quantizations, and image compression methods. All these steps have parameters that need to be tweaked per scene, which we need to somehow determine at compression time. The final format does not need to know about these, but may still want to keep them as metadata, to reproduce these results. The encoder also needs to produce the description that is found by the decoder to produce a renderable representation - the scene parameters.
+
+**Usually the details of each format are somewhat hidden in code or in a technical report. Our goal is to make these details explicit and visible. This includes both storage and the processing required to decode the stored files back into scene parameters.**
 
 By describing the building blocks of formats such as 3DGS .ply, .spz or gsplat compression, we hope to enable better tooling, interoperability, and faster iteration for novel methods. When the building blocks are in place, it should become much simpler for a novel representation to create a well-compressible and well-readable format.
 
