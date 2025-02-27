@@ -1,5 +1,5 @@
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,51 @@ from torch import Tensor
 
 from ..io.ply import encode_ply
 from ..models.gaussians import Gaussians
+
+
+class SerializableDumper(yaml.SafeDumper):
+    """Custom YAML Dumper with enhanced indentation and type handling.
+
+    Handles special Python types for serialization:
+    - defaultdicts
+    - torch.Size
+    - tuples
+    - dataclass instances
+
+    Removes Python-specific type tags from the output.
+    """
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+    def represent_defaultdict(self, data):
+        return self.represent_mapping("tag:yaml.org,2002:map", dict(data).items())
+
+    def represent_torch_size(self, data):
+        # Always use flow style for torch.Size
+        sequence = self.represent_sequence("tag:yaml.org,2002:seq", list(data))
+        sequence.flow_style = True
+        return sequence
+
+    def represent_tuple(self, data):
+        # Always use flow style for tuples
+        sequence = self.represent_sequence("tag:yaml.org,2002:seq", list(data))
+        sequence.flow_style = True
+        return sequence
+
+    def represent_list(self, data):
+        """Special representation for lists based on content."""
+        sequence = self.represent_sequence("tag:yaml.org,2002:seq", data)
+        # Use flow style for lists that contain only numbers
+        if all(isinstance(item, (int, float)) for item in data):
+            sequence.flow_style = True
+        return sequence
+
+    def represent_general(self, data):
+        """General representer that handles dataclasses specially."""
+        if is_dataclass(data) and not isinstance(data, type):
+            return self.represent_mapping("tag:yaml.org,2002:map", asdict(data).items())
+        return self.represent_data(data)
 
 
 @dataclass
@@ -32,6 +77,14 @@ class EncodingParams:
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
         return cls(files=data.get("files", []), fields=data.get("fields", {}))
+
+
+# Register representers for types outside the class definition
+SerializableDumper.add_representer(defaultdict, SerializableDumper.represent_defaultdict)
+SerializableDumper.add_representer(torch.Size, SerializableDumper.represent_torch_size)
+SerializableDumper.add_representer(tuple, SerializableDumper.represent_tuple)
+SerializableDumper.add_representer(list, SerializableDumper.represent_list)
+SerializableDumper.add_multi_representer(object, SerializableDumper.represent_general)
 
 
 @dataclass
@@ -186,8 +239,9 @@ class SceneEncoder:
         self._encode_fields()
         self._write_files()
 
+        # Write the YAML directly using our custom dumper
         with open(self.output_path / "container_meta.yaml", "w") as f:
-            yaml.dump(self.decoding_params, f)
+            yaml.dump(self.decoding_params, f, Dumper=SerializableDumper, default_flow_style=False, sort_keys=False)
 
 
 def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str) -> None:
