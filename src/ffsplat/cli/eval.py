@@ -114,9 +114,9 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Interactive compression tool parameters")
-    parser.add_argument("--dataset_path", type=str)
-    parser.add_argument("--data_path", type=str)
-    parser.add_argument("--results_path", type=str)
+    parser.add_argument("--dataset-path", type=str)
+    parser.add_argument("--data-path", type=str)
+    parser.add_argument("--results-path", type=str)
 
     args = parser.parse_args()
 
