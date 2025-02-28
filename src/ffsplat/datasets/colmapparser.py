@@ -78,7 +78,7 @@ class ColmapParser(DataParser):
         bottom: Float[NDArray, "1 4"] = np.array([0, 0, 0, 1]).reshape(1, 4)
         for idx, cam in enumerate(cams):
             trans, rot = math_utils.convert_coordinate_systems(
-                ["z", "-x", "-y"], cam.t, cam.r, tdir=[0, 0, 1], tup=[0, -1, 0]
+                ["-y", "-z", "x"], cam.t, cam.r, tdir=[0, 0, 1], tup=[0, -1, 0], transpose=True
             )
 
             trans = trans.reshape(3, 1)
@@ -106,7 +106,7 @@ class ColmapParser(DataParser):
             params, camtype = self._get_distortion_params(model, cam)
 
             params_dict[camera_id] = params
-            imsize_dict[camera_id] = (cam.resolution[0] // abs(factor), cam.resolution[1] // abs(factor))
+            imsize_dict[camera_id] = (cam.resolution[0], cam.resolution[1])
             mask_dict[camera_id] = None
             image_names.append(Path(cam.source_image).name)
         print(f"[Parser] {len(image_names)} images, taken by {len(set(camera_ids))} cameras.")
@@ -143,18 +143,19 @@ class ColmapParser(DataParser):
         image_paths: list[str] = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
         # load one image to check the size.
-        actual_image: Float[NDArray, " H W 3"] = np.array(Image.open(image_paths[0]))[..., :3]
+        actual_image: Float[NDArray, "H W 3"] = np.array(Image.open(image_paths[0]))[..., :3]
         actual_height, actual_width = actual_image.shape[:2]
 
         # need to check image resolution, side length > 1600 should be downscaled
         # based on https://github.com/graphdeco-inria/gaussian-splatting/blob/54c035f7834b564019656c3e3fcc3646292f727d/utils/camera_utils.py#L50
         max_side: int = max(actual_width, actual_height)
-        global_down: float = max_side / 1600.0
+        global_down: float = max(max_side / 1600.0, 1.0)
 
         if factor == -1 and max_side > 1600:
             print("Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.\n ")
             factor = global_down
-        image_dir = _resize_image_folder(colmap_image_dir, image_dir + "_1600px", factor=factor)
+            image_dir = _resize_image_folder(colmap_image_dir, image_dir + "_1600px", factor=factor)
+
         image_files = sorted(_get_rel_paths(image_dir))
         colmap_to_image = dict(zip(colmap_files, image_files))
         image_paths = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
@@ -172,17 +173,19 @@ class ColmapParser(DataParser):
         self.imsize_dict: Mapping[int, tuple[int, int]] = imsize_dict
         self.mask_dict: Mapping[int, Float[NDArray, "N M"] | None] = mask_dict
 
+        # load one image to check the size.
+        actual_image: Float[NDArray, "H W 3"] = np.array(Image.open(image_paths[0]))[..., :3]
+        actual_height, actual_width = actual_image.shape[:2]
         colmap_width, colmap_height = self.imsize_dict[self.camera_ids[0]]
         s_height, s_width = actual_height / colmap_height, actual_width / colmap_width
         for camera_id, K in self.Ks_dict.items():
-            K[:2, :] /= factor
             K[0, :] *= s_width
             K[1, :] *= s_height
             self.Ks_dict[camera_id] = K
             width, height = self.imsize_dict[camera_id]
             self.imsize_dict[camera_id] = (
-                int(width * s_width / global_down),
-                int(height * s_height / global_down),
+                int(width * s_width),
+                int(height * s_height),
             )
 
         # undistortion
