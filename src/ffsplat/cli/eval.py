@@ -1,5 +1,4 @@
 import os
-import time
 from argparse import ArgumentParser
 from collections import defaultdict
 from collections.abc import Mapping
@@ -59,7 +58,7 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
     lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=False).to(device)
 
     valloader = torch.utils.data.DataLoader(valset, batch_size=1, shuffle=False, num_workers=1)
-    ellipse_time = 0
+    elapsed_time = 0
     metrics = defaultdict(list)
 
     for i, data in enumerate(tqdm(valloader)):
@@ -69,8 +68,11 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
         masks = data["mask"].to(device) if "mask" in data else None
         height, width = pixels.shape[1:3]
 
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+
         torch.cuda.synchronize()
-        tic = time.time()
+        start_event.record()
         colors, _, _ = rasterize_splats(
             gaussians=gaussians,
             camtoworlds=camtoworlds,
@@ -80,8 +82,9 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
             masks=masks,
             use_white_background=valset.white_background,
         )  # [1, H, W, 3]
+        end_event.record()
         torch.cuda.synchronize()
-        ellipse_time += time.time() - tic
+        elapsed_time += start_event.elapsed_time(end_event) / 1000.0
 
         colors = torch.clamp(colors, 0.0, 1.0)
         canvas_list = [pixels, colors]
@@ -98,16 +101,16 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
         metrics["ssim"].append(ssim(colors_p, pixels_p))
         metrics["lpips"].append(lpips(colors_p, pixels_p))
 
-    ellipse_time /= len(valloader)
+    elapsed_time /= len(valloader)
 
     stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
     stats.update({
-        "ellipse_time": ellipse_time,
+        "elapsed_time": elapsed_time,
         "num_GS": len(gaussians.means_attr.decode()),
     })
     print(
         f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
-        f"Time: {stats['ellipse_time']:.3f}s/image "
+        f"Time: {stats['elapsed_time']:.3f}s/image "
         f"Number of GS: {stats['num_GS']}"
     )
 
