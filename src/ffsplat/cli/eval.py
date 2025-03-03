@@ -2,6 +2,7 @@ import os
 from argparse import ArgumentParser
 from collections import defaultdict
 from collections.abc import Mapping
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -12,10 +13,10 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from tqdm import tqdm
 
+from ffsplat.coding.scene_decoder import decode_gaussians
 from ffsplat.datasets.blenderparser import BlenderParser
 from ffsplat.datasets.colmapparser import ColmapParser
 from ffsplat.datasets.dataset import Dataset
-from ffsplat.io.ply import load_ply
 from ffsplat.models.gaussians import Gaussians
 
 
@@ -28,13 +29,13 @@ def rasterize_splats(
     masks: Tensor | None = None,
     use_white_background: bool = False,
 ) -> tuple[Tensor, Tensor, Mapping]:
-    colors = gaussians.sh_attr.decode()
+    colors = gaussians.sh
     background = torch.ones(1, colors.shape[-1], device="cuda") if use_white_background else None
     render_colors, render_alphas, info = rasterization(
-        means=gaussians.means_attr.decode(),
-        quats=gaussians.quaternions_attr.decode(),
-        scales=gaussians.scales_attr.decode(),
-        opacities=gaussians.opacities_attr.decode(),
+        means=gaussians.means,
+        quats=gaussians.quaternions,
+        scales=gaussians.scales,
+        opacities=gaussians.opacities,
         colors=colors,
         viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
         Ks=Ks,  # [C, 3, 3]
@@ -93,7 +94,7 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
         canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
         canvas = (canvas * 255).astype(np.uint8)
 
-        Image.fromarray(canvas).save(results_path + f"/eval_{i:04d}.png")
+        Image.fromarray(canvas).save(results_path / f"eval_{i:04d}.png")
 
         pixels_p = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
         colors_p = colors.permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -106,7 +107,7 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
     stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
     stats.update({
         "elapsed_time": elapsed_time,
-        "num_GS": len(gaussians.means_attr.decode()),
+        "num_GS": len(gaussians.means),
     })
     print(
         f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
@@ -117,13 +118,13 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: str) -> None
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Interactive compression tool parameters")
-    parser.add_argument("--dataset-path", type=str)
-    parser.add_argument("--data-path", type=str)
-    parser.add_argument("--results-path", type=str)
+    parser.add_argument("--dataset-path", type=Path)
+    parser.add_argument("--data-path", type=Path)
+    parser.add_argument("--results-path", type=Path)
 
     args = parser.parse_args()
 
-    gaussians = load_ply(args.data_path).to("cuda")
+    gaussians = decode_gaussians(args.data_path, "3DGS-INRIA.ply").to("cuda")
 
     dataset_dir = args.dataset_path
 
