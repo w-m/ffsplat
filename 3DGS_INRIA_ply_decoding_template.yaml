@@ -31,7 +31,7 @@ fields:
         dim: 1
     - reshape:
         shape: [-1, 1, 3]
-  
+
   f_rest:
     - combine:
         from_fields_with_prefix: point_cloud.ply@f_rest_
@@ -47,7 +47,7 @@ fields:
 
   sh:
     - combine:
-        from_field_list: [f_dc, f_rest]  
+        from_field_list: [f_dc, f_rest]
         method: concat
         dim: 1
 
@@ -59,10 +59,11 @@ fields:
 
   means:
     - combine:
-        from_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+        from_field_list:
+          [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
         method: stack
         dim: 1
-  
+
   scales:
     - combine:
         from_fields_with_prefix: point_cloud.ply@scale_
@@ -70,9 +71,8 @@ fields:
         dim: 1
     - remapping:
         method: exp
-  
-  opacities: 
+
+  opacities:
     - from_field: point_cloud.ply@opacity
     - remapping:
         method: sigmoid
-
