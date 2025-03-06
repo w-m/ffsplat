@@ -31,7 +31,8 @@ class BlenderParser(DataParser):
         # Load camera-to-world matrices.
         self.image_names: list[str] = []  # (num_images,)
         self.image_paths: list[str] = []  # (num_images,)
-        self.camtoworlds: list[Float[NDArray, "4 4"]] = []
+        self.camtoworlds: Float[NDArray, "N 4 4"] = np.empty((0, 4, 4))  # (num_images, 4, 4)
+        print(self.camtoworlds)
         self.camera_ids: list[int] = []  # (num_images,)
         self.Ks_dict: dict[int, Float[NDArray, "3 3"]] = {}  # camera_id -> K
         self.imsize_dict: dict[int, tuple[int, int]] = {}  # camera_id -> (width, height)
@@ -72,6 +73,7 @@ class BlenderParser(DataParser):
     def load_synthetic(self, data_dir: str, file: str, id_offset: int) -> None:
         cams = camorph.read_cameras("nerf", os.path.join(data_dir, file))
         bottom: Float[NDArray, "1 4"] = np.array([0, 0, 0, 1]).reshape(1, 4)
+        camtoworlds_list: list[Float[NDArray, "4 4"]] = []
 
         for idx, cam in enumerate(cams):
             image_path: str = cam.source_image
@@ -94,11 +96,11 @@ class BlenderParser(DataParser):
 
             fx, fy = cam.focal_length_px
             cx, cy = cam.principal_point
-            K: Float[NDArray, "3 3"] = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+            K: Float[NDArray, "3 3"] = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
             self.Ks_dict[camera_id] = K
 
             self.camera_ids.append(camera_id)
-            self.camtoworlds.append(c2w)
+            camtoworlds_list.append(c2w)
             self.imsize_dict[camera_id] = (
                 image.width,
                 image.height,
@@ -108,4 +110,5 @@ class BlenderParser(DataParser):
             self.mask_dict[camera_id] = None
             self.image_names.append(image_name)
             self.image_paths.append(image_path)
+        self.camtoworlds = np.concatenate([self.camtoworlds, np.stack(camtoworlds_list, axis=0)], axis=0)
         return

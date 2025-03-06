@@ -57,7 +57,6 @@ class ColmapParser(DataParser):
     ) -> None:
         self.data_dir: str = data_dir
         self.normalize_data: bool = normalize_data
-        self.test_every: int = test_every
         self.datatype: str = "colmap"
 
         colmap_dir: str = os.path.join(data_dir, "sparse/0/")
@@ -159,8 +158,6 @@ class ColmapParser(DataParser):
         colmap_to_image = dict(zip(colmap_files, image_files))
         image_paths = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
-        self.factor: float = factor
-
         # Normalize the world space.
         self._normalize(camtoworlds)
 
@@ -198,6 +195,9 @@ class ColmapParser(DataParser):
         scene_center: Float[NDArray, " 3"] = np.mean(camera_locations, axis=0)
         dists: Float[NDArray, " N"] = np.linalg.norm(camera_locations - scene_center, axis=1)
         self.scene_scale: float = np.max(dists)
+        indices = np.arange(len(self.image_names))
+        self.train_indices = indices[indices % test_every != 0]
+        self.test_indices = indices[indices % test_every == 0]
 
     def _undistort(self, camtype: str) -> None:
         for camera_id in self.params_dict:

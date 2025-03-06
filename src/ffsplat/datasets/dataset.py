@@ -17,18 +17,13 @@ class Dataset:
     def __init__(self, parser: DataParser, split: str = "eval", load_depths: bool = False):
         self.parser = parser
         self.split = split
+        if split == "train":
+            self.indices = self.parser.train_indices
+        else:
+            self.indices = self.parser.test_indices
         if parser.datatype == "blender":
-            if split == "train":
-                self.indices = self.parser.train_indices
-            else:
-                self.indices = self.parser.test_indices
             self.white_background = True
         elif parser.datatype == "colmap":
-            indices = np.arange(len(self.parser.image_names))
-            if split == "train":
-                self.indices = indices[indices % self.parser.test_every != 0]
-            else:
-                self.indices = indices[indices % self.parser.test_every == 0]
             self.white_background = False
 
     def __len__(self):
