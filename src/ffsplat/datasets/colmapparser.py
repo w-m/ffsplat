@@ -1,5 +1,4 @@
 import os
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -71,10 +70,10 @@ class ColmapParser(DataParser):
         camera_ids: list[int] = []
         c2w_mats: list[Float[NDArray, "4 4"]] = []
         image_names: list[str] = []
-        Ks_dict: Mapping[int, Float[NDArray, "3 3"]] = {}
-        params_dict: Mapping[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = {}
-        imsize_dict: Mapping[int, tuple[int, int]] = {}
-        mask_dict: Mapping[int, Float[NDArray, "N M"] | None] = {}
+        Ks_dict: dict[int, Float[NDArray, "3 3"]] = {}
+        params_dict: dict[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = {}
+        imsize_dict: dict[int, tuple[int, int]] = {}
+        mask_dict: dict[int, Float[NDArray, "N M"] | None] = {}
         bottom: Float[NDArray, "1 4"] = np.array([0, 0, 0, 1]).reshape(1, 4)
         for idx, cam in enumerate(cams):
             trans, rot = math_utils.convert_coordinate_systems(
@@ -139,7 +138,7 @@ class ColmapParser(DataParser):
             image_dir = _resize_image_folder(colmap_image_dir, image_dir + "_png", factor=factor)
             image_files = sorted(_get_rel_paths(image_dir))
 
-        colmap_to_image: Mapping[str, str] = dict(zip(colmap_files, image_files))
+        colmap_to_image: dict[str, str] = dict(zip(colmap_files, image_files))
         image_paths: list[str] = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
         # load one image to check the size.
@@ -168,10 +167,10 @@ class ColmapParser(DataParser):
         self.image_names: list[str] = image_names
         self.image_paths: list[str] = image_paths
         self.camera_ids: list[int] = camera_ids
-        self.Ks_dict: Mapping[int, Float[NDArray, "3 3"]] = Ks_dict
-        self.params_dict: Mapping[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = params_dict
-        self.imsize_dict: Mapping[int, tuple[int, int]] = imsize_dict
-        self.mask_dict: Mapping[int, Float[NDArray, "N M"] | None] = mask_dict
+        self.Ks_dict: dict[int, Float[NDArray, "3 3"]] = Ks_dict
+        self.params_dict: dict[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = params_dict
+        self.imsize_dict: dict[int, tuple[int, int]] = imsize_dict
+        self.mask_dict: dict[int, Float[NDArray, "N M"] | None] = mask_dict
 
         # load one image to check the size.
         actual_image: Float[NDArray, "H W 3"] = np.array(Image.open(image_paths[0]))[..., :3]
@@ -189,9 +188,9 @@ class ColmapParser(DataParser):
             )
 
         # undistortion
-        self.mapx_dict: Mapping[int, Float[NDArray, " N M"]] = {}
-        self.mapy_dict: Mapping[int, Float[NDArray, " N M"]] = {}
-        self.roi_undist_dict: Mapping[int, list[int]] = {}
+        self.mapx_dict: dict[int, Float[NDArray, " N M"]] = {}
+        self.mapy_dict: dict[int, Float[NDArray, " N M"]] = {}
+        self.roi_undist_dict: dict[int, list[int]] = {}
         self._undistort(camtype)
 
         # size of the scene measured by cameras

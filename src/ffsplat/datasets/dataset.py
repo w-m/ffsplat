@@ -1,7 +1,6 @@
 # This class builds on https://github.com/nerfstudio-project/gsplat/blob/0880d2b471e6650d458aa09fe2b2834531f6e93b/examples/datasets/colmap.py
 
 
-from collections.abc import Mapping
 from typing import Any
 
 import cv2
@@ -35,7 +34,7 @@ class Dataset:
     def __len__(self):
         return len(self.indices)
 
-    def __getitem__(self, item: int) -> Mapping[str, Any]:
+    def __getitem__(self, item: int) -> dict[str, Any]:
         index = self.indices[item]
         camera_id = self.parser.camera_ids[index]
         image = Image.open(self.parser.image_paths[index])
