@@ -1,7 +1,6 @@
 import os
 from argparse import ArgumentParser
 from collections import defaultdict
-from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +27,7 @@ def rasterize_splats(
     height: int,
     masks: Tensor | None = None,
     use_white_background: bool = False,
-) -> tuple[Tensor, Tensor, Mapping]:
+) -> tuple[Tensor, Tensor, dict]:
     colors = gaussians.sh
     background = torch.ones(1, colors.shape[-1], device="cuda") if use_white_background else None
     render_colors, render_alphas, info = rasterization(

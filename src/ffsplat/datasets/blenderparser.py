@@ -1,5 +1,4 @@
 import os
-from collections.abc import Mapping
 from pathlib import Path
 
 import camorph.camorph as camorph
@@ -34,10 +33,10 @@ class BlenderParser(DataParser):
         self.image_paths: list[str] = []  # (num_images,)
         self.camtoworlds: list[Float[NDArray, "4 4"]] = []
         self.camera_ids: list[int] = []  # (num_images,)
-        self.Ks_dict: Mapping[int, Float[NDArray, "3 3"]] = {}  # camera_id -> K
-        self.imsize_dict: Mapping[int, tuple[int, int]] = {}  # camera_id -> (width, height)
-        self.params_dict: Mapping[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = {}
-        self.mask_dict: Mapping[int, None] = {}
+        self.Ks_dict: dict[int, Float[NDArray, "3 3"]] = {}  # camera_id -> K
+        self.imsize_dict: dict[int, tuple[int, int]] = {}  # camera_id -> (width, height)
+        self.params_dict: dict[int, Float[NDArray, " 4"] | Float[NDArray, " 0"]] = {}
+        self.mask_dict: dict[int, None] = {}
 
         self.load_synthetic(data_dir, "transforms_train.json", 0)
 
