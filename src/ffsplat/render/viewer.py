@@ -128,6 +128,11 @@ class Viewer:
             )
             self._max_img_res_slider.on_update(self.rerender)
 
+    def add_eval(self, eval_fn: Callable):
+        with self.server.gui.add_folder("Evaluation") as self.eval_folder:
+            self._eval_button = self.server.gui.add_button("Run evaluation")
+            self._eval_button.on_click(eval_fn)
+
     def _toggle_train_buttons(self, _):
         self._pause_train_button.visible = not self._pause_train_button.visible
         self._resume_train_button.visible = not self._resume_train_button.visible
