@@ -20,6 +20,62 @@ from ffsplat.datasets.colmapparser import ColmapParser
 from ffsplat.datasets.dataset import Dataset
 from ffsplat.render.viewer import CameraState, Viewer
 
+table_base = """
+<div style="overflow-x:auto;display: flex; justify-content: center;">
+  <style>
+    table {
+      width: 80%;
+      border-collapse: collapse;
+      table-layout: auto;
+    }
+
+    th, td {
+      padding: 8px;
+      text-align: left;
+      border: 1px solid grey;
+      word-wrap: break-word; /* Ensures long words are broken onto the next line */
+      white-space: normal; /* Prevents text from overflowing horizontally */
+    }
+
+    th {
+      background-color: #f2f2f2;
+    }
+
+  </style>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>PSNR</th>
+        <th>SSIM</th>
+        <th>LPIPS</th>
+        <th>Number of GS</th>
+      </tr>
+    </thead>
+    <tbody>
+"""
+
+table_end = """
+    </tbody>
+  </table>
+</div>
+"""
+
+
+def get_table_str(metrics: dict[str, dict[str, float | int]]) -> str:
+    table = table_base
+
+    for scene, scene_metrics in metrics.items():
+        table += f"<tr><td>{scene}</td>"
+        table += f"<td>{scene_metrics['psnr']:.3f}</td>"
+        table += f"<td>{scene_metrics['ssim']:.4f}</td>"
+        table += f"<td>{scene_metrics['lpips']:.3f}</td>"
+        table += f"<td>{scene_metrics['num_GS']}</td>"
+        table += "</tr>"
+    table += table_end
+    return table
+
 
 # This class defines the functionality of the viewer that goes beyond the rendering
 class InteractiveConversionTool:
@@ -50,6 +106,12 @@ class InteractiveConversionTool:
             self.dataset = Dataset(dataparser)
             self.viewer.add_eval(self.eval)
 
+    # TODO:
+    # how to handle multiple scenes after running conversion?
+    # should evaluate original only once and only recompute the converted scene
+    # store results in class and wrapper for eval that runs for the necessary scenes?
+    # how do i store converted scenes?
+    # could store in temp folder or just a list of scenes?
     def eval(self, _):
         print("Running evaluation...")
         device = "cuda"
@@ -74,6 +136,7 @@ class InteractiveConversionTool:
                 lpips,
                 data,
             )
+            self.viewer.eval_progress.value = (i + 1) / len(valloader) * 100
 
         elapsed_time /= len(valloader)
 
@@ -82,11 +145,8 @@ class InteractiveConversionTool:
             "elapsed_time": elapsed_time,
             "num_GS": len(self.gaussians.means),
         })
-        print(
-            f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
-            f"Time: {stats['elapsed_time']:.3f}s/image "
-            f"Number of GS: {stats['num_GS']}"
-        )
+        stats_scene = {"input": stats}
+        self.viewer.eval_table.content = get_table_str(stats_scene)
 
     @torch.no_grad()
     def render_fn(
