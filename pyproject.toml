@@ -18,7 +18,6 @@ classifiers = [
 dependencies = [
     "gsplat>=1.4.0,<2.0.0",
     "torch>=2.6.0,<3.0.0",
-    "viser>=0.2.23,<0.3.0",
     "jaxtyping>=0.2.25,<0.3.0",
     "numpy>=2.0.0,<3.0.0",
     "plyfile>=1.1.0,<2.0.0",
@@ -38,6 +37,7 @@ dependencies = [
     # "torchvision>=0.21.0,<1.0.0",
     "camorph",
     "plas",
+    "viser",
 ]
 
 [[tool.uv.index]]
@@ -54,6 +54,9 @@ torchvision = [
 ]
 camorph = { git = "https://github.com/fbranschke/camorph.git" }
 plas = { git = "https://github.com/fraunhoferhhi/PLAS.git" }
+# newest release does not support html elements. Use a commit that does. This can be changed with the next release.
+viser = { git = "https://github.com/nerfstudio-project/viser.git" , rev = "0cb94054b29028a012aeeba11b00a5477b09a2fa"}
+
 
 [project.urls]
 Homepage = "https://w-m.github.io/ffsplat/"
