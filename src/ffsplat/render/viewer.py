@@ -99,6 +99,7 @@ class Viewer:
         self._define_guis()
 
     def _define_guis(self):
+        self.server.gui.configure_theme(control_width="large")
         with self.server.gui.add_folder("Stats", visible=self.mode == "training") as self._stats_folder:
             self._stats_text_fn = (
                 lambda: f"""<sub>
@@ -132,6 +133,8 @@ class Viewer:
         with self.server.gui.add_folder("Evaluation") as self.eval_folder:
             self._eval_button = self.server.gui.add_button("Run evaluation")
             self._eval_button.on_click(eval_fn)
+            self.eval_progress = self.server.gui.add_progress_bar(0.0)
+            self.eval_table = self.server.gui.add_html("")
 
     def _toggle_train_buttons(self, _):
         self._pause_train_button.visible = not self._pause_train_button.visible
