@@ -229,13 +229,19 @@ class SceneEncoder:
                 if field_name.startswith(field_prefix)
             }
 
+            output_file_path = self.output_path / file_path
+
             match file_type:
                 case "ply":
-                    encode_ply(fields=fields_to_write, path=file_path)
+                    encode_ply(fields=fields_to_write, path=output_file_path)
                 case _:
                     raise NotImplementedError(f"Encoding for {file_type} is not supported")
 
     def encode(self) -> None:
+
+        # container as folder for now
+        self.output_path.mkdir(parents=True, exist_ok=True)
+
         self._encode_fields()
         self._write_files()
 
