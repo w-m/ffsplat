@@ -218,9 +218,6 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
         unshuffled_flat_indices = shuffled_indices[flat_indices]
         sorted_indices = unshuffled_flat_indices.reshape(sorted_indices.shape)
 
-    grid_shape = (int(math.sqrt(sorted_indices.shape[0])), int(math.sqrt(sorted_indices.shape[0])))
-    sorted_indices = sorted_indices.reshape(grid_shape)
-
     return sorted_indices
 
 
