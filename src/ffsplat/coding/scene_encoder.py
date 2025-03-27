@@ -62,13 +62,32 @@ class DecodingParams:
     # in decoding, the fields shouldn't be nullable
     """Parameters for decoding 3D scene formats."""
 
+    container_identifier: str = "smurfx"
+    container_version: str = "0.1"
+
+    packer: str = "ffsplat-v0.1"
+
+    meta: dict[str, Any] = field(default_factory=dict)
+
     files: list[dict[str, str]] = field(default_factory=list)
     fields: defaultdict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
     scene: dict[str, Any] = field(default_factory=dict)
 
+    def reverse_fields(self):
+        """The operations we're accumulation during encoding need to be reversed for decoding."""
+        prev_fields = self.fields.copy()
+        self.fields = defaultdict(list)
+        for field_name, field_ops in reversed(prev_fields.items()):
+            self.fields[field_name] = list(reversed(field_ops))
+
 
 @dataclass
 class EncodingParams:
+    profile: str
+    profile_version: str
+
+    scene: dict[str, Any]
+
     fields: dict[str, dict[str, Any]]
     files: list[dict[str, str]]
 
@@ -76,7 +95,13 @@ class EncodingParams:
     def from_yaml_file(cls, yaml_path: Path) -> "EncodingParams":
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
-        return cls(files=data.get("files", []), fields=data.get("fields", {}))
+        return cls(
+            profile=data["profile"],
+            profile_version=data["profile_version"],
+            scene=data["scene"],
+            fields=data["fields"],
+            files=data.get("files", []),
+        )
 
 
 # Register representers for types outside the class definition
@@ -219,7 +244,7 @@ class SceneEncoder:
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
-            file_path = Path(file["file_path"])
+            file_path = file["file_path"]
             file_type = file["type"]
             field_prefix = file["fields_with_prefix"]
 
@@ -228,6 +253,12 @@ class SceneEncoder:
                 for field_name, field_data in self.fields.items()
                 if field_name.startswith(field_prefix)
             }
+
+            self.decoding_params.files.append({
+                "file_path": file_path,
+                "type": file_type,
+                "field_prefix": field_prefix,
+            })
 
             output_file_path = self.output_path / file_path
 
@@ -244,6 +275,10 @@ class SceneEncoder:
 
         self._encode_fields()
         self._write_files()
+
+        # revert the order of the fields in self.decoding_params to enable straightforward decoding
+        self.decoding_params.reverse_fields()
+        self.decoding_params.scene = self.encoding_params.scene
 
         # Write the YAML directly using our custom dumper
         with open(self.output_path / "container_meta.yaml", "w") as f:
