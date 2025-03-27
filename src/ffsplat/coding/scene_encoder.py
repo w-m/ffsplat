@@ -62,10 +62,13 @@ class DecodingParams:
     # in decoding, the fields shouldn't be nullable
     """Parameters for decoding 3D scene formats."""
 
-    container_identifier: str = "smurfx"
-    container_version: str = "0.1"
+    container_identifier: str
+    container_version: str
 
-    packer: str = "ffsplat-v0.1"
+    packer: str
+
+    profile: str
+    profile_version: str
 
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -116,9 +119,9 @@ SerializableDumper.add_multi_representer(object, SerializableDumper.represent_ge
 class SceneEncoder:
     encoding_params: EncodingParams
     output_path: Path
-    fields: dict[str, Tensor] = field(default_factory=dict)
+    decoding_params: DecodingParams
 
-    decoding_params: DecodingParams = field(default_factory=DecodingParams)
+    fields: dict[str, Tensor] = field(default_factory=dict)
 
     # encoding YAML
 
@@ -285,7 +288,6 @@ class SceneEncoder:
 
         # revert the order of the fields in self.decoding_params to enable straightforward decoding
         self.decoding_params.reverse_fields()
-        self.decoding_params.scene = self.encoding_params.scene
 
         # Write the YAML directly using our custom dumper
         with open(self.output_path / "container_meta.yaml", "w") as f:
@@ -296,8 +298,22 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
     match output_format:
         case "3DGS-INRIA.ply":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_ply.yaml"))
+        case "SOG-web":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web.yaml"))
         case _:
             raise ValueError(f"Unsupported output format: {output_format}")
 
-    encoder = SceneEncoder(encoding_params=encoding_params, output_path=output_path, fields=gaussians.to_dict())
+    encoder = SceneEncoder(
+        encoding_params=encoding_params,
+        output_path=output_path,
+        fields=gaussians.to_dict(),
+        decoding_params=DecodingParams(
+            container_identifier="smurfx",
+            container_version="0.1",
+            packer="ffsplat-v0.1",
+            profile=encoding_params.profile,
+            profile_version=encoding_params.profile_version,
+            scene=encoding_params.scene,
+        ),
+    )
     encoder.encode()
