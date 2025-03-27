@@ -149,6 +149,11 @@ def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
         decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_decoding_template.yaml")).with_input_path(
             input_path
         )
+    elif input_format == "smurfx":
+        # check input_path is a directory
+        if not input_path.is_dir():
+            raise ValueError("Input path must be a directory for smurfx format")
+        decoding_params = DecodingParams.from_yaml_file(input_path / Path("container_meta.yaml"))
     else:
         raise ValueError(f"Unsupported input format: {input_format}")
 

@@ -16,6 +16,7 @@ fields:
         to_field_list: [f_dc, f_rest]
         split_size_or_sections: [1, 15]
         dim: 1
+        squeeze: false
 
   f_dc:
     - reshape:
@@ -24,29 +25,33 @@ fields:
         to_fields_with_prefix: point_cloud.ply@f_dc_
         split_size_or_sections: 1
         dim: 1
-  
+        squeeze: true
+
   f_rest:
-    # TODO what is the correct order of f_rest?
-    # requires reshape / permute?
+    - permute:
+        dims: [0, 2, 1]
     - reshape:
         shape: [-1, 45]
     - split:
         to_fields_with_prefix: point_cloud.ply@f_rest_
         split_size_or_sections: 1
         dim: 1
+        squeeze: true
 
   quaternions:
     - split:
         to_fields_with_prefix: point_cloud.ply@rot_
         split_size_or_sections: 1
         dim: 1
+        squeeze: true
 
   means:
     - split:
         to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
         split_size_or_sections: 1
         dim: 1
-  
+        squeeze: true
+
   scales:
     - remapping:
         method: log
@@ -54,8 +59,9 @@ fields:
         to_fields_with_prefix: point_cloud.ply@scale_
         split_size_or_sections: 1
         dim: 1
-  
-  opacities: 
+        squeeze: true
+
+  opacities:
     - remapping:
         method: inverse-sigmoid
     - to_field: point_cloud.ply@opacity

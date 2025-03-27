@@ -212,11 +212,14 @@ class SceneEncoder:
                             "to_field_list": to_field_list,
                             "split_size_or_sections": split_size_or_sections,
                             "dim": dim,
+                            "squeeze": squeeze,
                         }
                     }:
                         field_data = field_data.split(split_size_or_sections, dim)
                         for target_field_name, target_field_data in zip(to_field_list, field_data):
-                            self.fields[target_field_name] = target_field_data.squeeze(dim)
+                            if squeeze:
+                                target_field_data = target_field_data.squeeze(dim)
+                            self.fields[target_field_name] = target_field_data
 
                         self.decoding_params.fields[field_name].append({
                             "combine": {
@@ -241,6 +244,11 @@ class SceneEncoder:
                     case {"to_field": name}:
                         self.decoding_params.fields[field_name].append({"from_field": name})
                         self.fields[name] = field_data
+                    case {"permute": {"dims": dims}}:
+                        self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
+                        field_data = field_data.permute(*dims)
+                    case _:
+                        raise ValueError(f"Unsupported field operation: {field_op}")
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
@@ -269,7 +277,6 @@ class SceneEncoder:
                     raise NotImplementedError(f"Encoding for {file_type} is not supported")
 
     def encode(self) -> None:
-
         # container as folder for now
         self.output_path.mkdir(parents=True, exist_ok=True)
 
