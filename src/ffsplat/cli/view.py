@@ -3,6 +3,7 @@ import time
 from argparse import ArgumentParser
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import torch
 import viser
@@ -15,12 +16,39 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from ffsplat.cli.eval import eval_step
 from ffsplat.coding.scene_decoder import decode_gaussians
+from ffsplat.coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
 from ffsplat.datasets.blenderparser import BlenderParser
 from ffsplat.datasets.colmapparser import ColmapParser
 from ffsplat.datasets.dataset import Dataset
 from ffsplat.render.viewer import CameraState, Viewer
 
-table_base = """
+# TODO: this is a duplicate with the viewer
+encoding_formats: list[str] = ["3DGS_INRIA_ply", "SOG-web"]  # available formats
+
+operations: dict[str, list[str]] = {"remapping": ["inverse-sigmoid", "log"]}  # methods for each operation
+
+
+def create_update_field(dict_to_update: dict[str, Any], key: str):
+    def update_field(gui_event):
+        print("I am here")
+        dict_to_update[key] = gui_event.target.value
+
+    return update_field
+
+
+def get_table_row(scene, scene_metrics: dict[str, float | int]) -> str:
+    table_row = f"<tr><td>{scene}</td>"
+    table_row += f"<td>{scene_metrics['psnr']:.3f}</td>"
+    table_row += f"<td>{scene_metrics['ssim']:.4f}</td>"
+    table_row += f"<td>{scene_metrics['lpips']:.3f}</td>"
+    table_row += f"<td>{scene_metrics['num_GS']}</td>"
+    table_row += "</tr>"
+    return table_row
+
+
+# This class defines the functionality of the viewer that goes beyond the rendering
+class InteractiveConversionTool:
+    table_base = """
 <div style="overflow-x:auto;display: flex; justify-content: center;">
   <style>
     table {
@@ -55,30 +83,14 @@ table_base = """
     </thead>
     <tbody>
 """
-
-table_end = """
+    table_end = """
     </tbody>
   </table>
 </div>
 """
+    table_rows = ""
+    encoding_params: EncodingParams | None = None
 
-
-def get_table_str(metrics: dict[str, dict[str, float | int]]) -> str:
-    table = table_base
-
-    for scene, scene_metrics in metrics.items():
-        table += f"<tr><td>{scene}</td>"
-        table += f"<td>{scene_metrics['psnr']:.3f}</td>"
-        table += f"<td>{scene_metrics['ssim']:.4f}</td>"
-        table += f"<td>{scene_metrics['lpips']:.3f}</td>"
-        table += f"<td>{scene_metrics['num_GS']}</td>"
-        table += "</tr>"
-    table += table_end
-    return table
-
-
-# This class defines the functionality of the viewer that goes beyond the rendering
-class InteractiveConversionTool:
     def __init__(self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path):
         self.input_format = input_format
         self.dataset = dataset_path
@@ -104,7 +116,84 @@ class InteractiveConversionTool:
                 raise ValueError("could not identify type of dataset")
 
             self.dataset = Dataset(dataparser)
-            self.viewer.add_eval(self.eval)
+            self.viewer.add_eval(self._eval)
+
+        self.viewer.add_convert(self._build_convert_options, self.convert)
+
+        # self.viewer.add_test_functionality(self.change_scene)
+
+    def convert(self, _):
+        # we shouldn't redo the encoding completely every time, as resorting takes a lot of time
+        encoding_params = self.encoding_params
+
+        # TODO: use tempfile
+        encoder = SceneEncoder(
+            encoding_params=encoding_params,
+            output_path=Path("./temp/gaussians"),
+            fields=self.gaussians.to_dict(),
+            decoding_params=DecodingParams(
+                container_identifier="smurfx",
+                container_version="0.1",
+                packer="ffsplat-v0.1",
+                profile=encoding_params.profile,
+                profile_version=encoding_params.profile_version,
+                scene=encoding_params.scene,
+            ),
+        )
+        # encode writes yaml to output_path but ply to working directory
+        # also container meta does not contain the files and the scene data
+        encoder.encode()
+
+    def _build_convert_options(self, _):
+        # this is not a class function of the viewer to store the handles in a dict in this class. this is to separate the logic of the conversion from the viewer. this way we can store the handles and their data needed for the conversion in this class
+        # clear previous gui conversion handles
+        # TODO: should we store the handles in the viewer? or should we store them in this class?
+        # is the split between the viewer necessary at all? i did this to separate the logic of the evaluation from the viewer, but the split is not as clean as initially thought
+        for handle in self.viewer.convert_gui_handles:
+            handle.remove()
+
+        # load the default encoding params
+        self.encoding_handler = {}
+        output_format = self.viewer._output_dropdown.value
+        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+        print(self.encoding_params)
+
+        # TODO: why is this in this with block?
+        with self.viewer.convert_folder:
+            self.viewer.convert_gui_handles = []
+
+            for field_name, field_operations in self.encoding_params.fields.items():
+                with self.viewer.server.gui.add_folder(field_name) as field_folder:
+                    field_is_customizable = False
+                    for idx, field_operation in enumerate(field_operations):
+                        for operation, operation_options in operations.items():
+                            if operation in field_operation:
+                                field_is_customizable = True
+                                dropdown_handle = self.viewer.server.gui.add_dropdown(
+                                    operation, operation_options, field_operation[operation]["method"]
+                                )
+                                dropdown_handle.on_update(
+                                    create_update_field(
+                                        self.encoding_params.fields[field_name][idx][operation], "method"
+                                    )
+                                )
+
+                    if not field_is_customizable:
+                        field_folder.remove()
+                    else:
+                        self.viewer.convert_gui_handles.append(field_folder)
+
+    def change_scene(self, _):
+        print("Changing scene...")
+        new_gaussians = decode_gaussians(
+            input_path=Path(
+                "../mini-splatting2/results/minisplat_dense/360/flowers/point_cloud/iteration_18000/point_cloud.ply"
+            ),
+            input_format=self.input_format,
+        )
+        self.gaussians = new_gaussians.to("cuda")
+        self.viewer.rerender(_)
+        print("Scene changed.")
 
     # TODO:
     # how to handle multiple scenes after running conversion?
@@ -112,7 +201,8 @@ class InteractiveConversionTool:
     # store results in class and wrapper for eval that runs for the necessary scenes?
     # how do i store converted scenes?
     # could store in temp folder or just a list of scenes?
-    def eval(self, _):
+    # add file size to table? and to eval.py
+    def _eval(self, _):
         print("Running evaluation...")
         device = "cuda"
         ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
@@ -145,8 +235,8 @@ class InteractiveConversionTool:
             "elapsed_time": elapsed_time,
             "num_GS": len(self.gaussians.means),
         })
-        stats_scene = {"input": stats}
-        self.viewer.eval_table.content = get_table_str(stats_scene)
+        self.table_rows += get_table_row("input", stats)
+        self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
 
     @torch.no_grad()
     def render_fn(
@@ -210,6 +300,7 @@ def main(parser: ArgumentParser):
     )
 
     print("Viewer running... Ctrl+C to exit.")
+    # TODO: clean up temp folder on keyboard interrupt
     time.sleep(100000)
 
 
