@@ -2,6 +2,7 @@ import os
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,6 @@ operations: dict[str, list[str]] = {"remapping": ["inverse-sigmoid", "log"]}  # 
 
 def create_update_field(dict_to_update: dict[str, Any], key: str):
     def update_field(gui_event):
-        print("I am here")
         dict_to_update[key] = gui_event.target.value
 
     return update_field
@@ -46,13 +46,24 @@ def get_table_row(scene, scene_metrics: dict[str, float | int]) -> str:
     return table_row
 
 
+@dataclass
+class SceneData:
+    id: int
+    description: str
+    input_path: Path
+    input_format: str
+    scene_metrics: dict[str, float | int] = None
+    # encoding_params: EncodingParams | None
+    # gaussians: Tensor
+
+
 # This class defines the functionality of the viewer that goes beyond the rendering
 class InteractiveConversionTool:
     table_base = """
 <div style="overflow-x:auto;display: flex; justify-content: center;">
   <style>
     table {
-      width: 80%;
+      width: 90%;
       border-collapse: collapse;
       table-layout: auto;
     }
@@ -74,7 +85,7 @@ class InteractiveConversionTool:
   <table>
     <thead>
       <tr>
-        <th>Data</th>
+        <th>id</th>
         <th>PSNR</th>
         <th>SSIM</th>
         <th>LPIPS</th>
@@ -92,11 +103,11 @@ class InteractiveConversionTool:
     encoding_params: EncodingParams | None = None
 
     def __init__(self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path):
-        self.input_format = input_format
-        self.dataset = dataset_path
-        self.results = results_path
-        self.write_images = results_path is not None
-        self.results_path = results_path
+        self.scenes: list[SceneData] = []
+        self.dataset: Path = dataset_path
+        self.write_images: bool = results_path is not None
+        self.results_path: Path = results_path
+        self.current_scene = 0
 
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format)
         self.gaussians = self.input_gaussians.to("cuda")
@@ -116,21 +127,23 @@ class InteractiveConversionTool:
                 raise ValueError("could not identify type of dataset")
 
             self.dataset = Dataset(dataparser)
-            self.viewer.add_eval(self._eval)
+            self.viewer.add_eval(self.full_evaluation)
 
         self.viewer.add_convert(self._build_convert_options, self.convert)
+        self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
 
     def convert(self, _):
         # we shouldn't redo the encoding completely every time, as resorting takes a lot of time
         encoding_params = self.encoding_params
+        output_path = Path(f"./temp/gaussians{len(self.scenes)}")
 
         # TODO: use tempfile
         encoder = SceneEncoder(
             encoding_params=encoding_params,
-            output_path=Path("./temp/gaussians"),
-            fields=self.gaussians.to_dict(),
+            output_path=output_path,
+            fields=self.input_gaussians.to_dict(),
             decoding_params=DecodingParams(
                 container_identifier="smurfx",
                 container_version="0.1",
@@ -144,6 +157,68 @@ class InteractiveConversionTool:
         # also container meta does not contain the files and the scene data
         encoder.encode()
 
+        # add scene to scene list and load it to view the scene
+        output_format = self.viewer._output_dropdown.value
+        self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
+
+    # TODO: add a button to save the scene in an output directory?
+    # should we be able to remove scenes again? scenes are removed on program termination
+    def _add_scene(self, description, input_path, input_format):
+        self.scenes.append(
+            SceneData(id=len(self.scenes), description=description, input_path=input_path, input_format=input_format)
+        )
+        self.viewer.add_to_scene_tab(len(self.scenes) - 1, description, self._load_scene)
+        self._load_scene(len(self.scenes) - 1)
+
+    def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
+        description = "**Template**  \n"
+        description += f"{output_format}  \n"
+        for field_name, field_operations in encoding_params.fields.items():
+            for field_operation in field_operations:
+                for operation, _ in operations.items():
+                    if operation in field_operation:
+                        description += f" **{field_name}**  \n"
+                        description += f"  {operation}: {field_operation[operation]['method']}  \n"
+        return description
+
+    def _load_scene(self, scene_id):
+        print("Loading scene...")
+
+        # update the load buttons
+        print(scene_id)
+        self.viewer.load_buttons[self.current_scene].disabled = False
+        self.current_scene = scene_id
+        self.viewer.load_buttons[self.current_scene].disabled = True
+
+        self.viewer.scene_label.content = f"Showing scene: {scene_id}"
+
+        # load scene
+        scene = self.scenes[scene_id]
+        self.gaussians = decode_gaussians(scene.input_path, input_format=scene.input_format).to("cuda")
+        self.deactivate_convert_preview()
+
+        self.viewer.rerender(None)
+
+    def full_evaluation(self, _):
+        self.table_rows = ""
+        for scene in self.scenes:
+            if scene.scene_metrics is None:
+                self.viewer.eval_info.visible = True
+                self.viewer.eval_info.content = f"Running evaluation for scene {scene.id}..."
+                self.viewer.eval_progress.visible = True
+                self.viewer.eval_progress.value = 0
+                self._load_scene(scene.id)
+                self._eval(scene.id)
+            self.table_rows += get_table_row(scene.id, scene.scene_metrics)
+            self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
+        self.viewer.eval_info.visible = False
+        self.viewer.eval_progress.visible = False
+
+    def deactivate_convert_preview(
+        self,
+    ):
+        pass
+
     def _build_convert_options(self, _):
         # this is not a class function of the viewer to store the handles in a dict in this class. this is to separate the logic of the conversion from the viewer. this way we can store the handles and their data needed for the conversion in this class
         # clear previous gui conversion handles
@@ -156,7 +231,6 @@ class InteractiveConversionTool:
         self.encoding_handler = {}
         output_format = self.viewer._output_dropdown.value
         self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
-        print(self.encoding_params)
 
         # TODO: why is this in this with block?
         with self.viewer.convert_folder:
@@ -183,26 +257,8 @@ class InteractiveConversionTool:
                     else:
                         self.viewer.convert_gui_handles.append(field_folder)
 
-    def change_scene(self, _):
-        print("Changing scene...")
-        new_gaussians = decode_gaussians(
-            input_path=Path(
-                "../mini-splatting2/results/minisplat_dense/360/flowers/point_cloud/iteration_18000/point_cloud.ply"
-            ),
-            input_format=self.input_format,
-        )
-        self.gaussians = new_gaussians.to("cuda")
-        self.viewer.rerender(_)
-        print("Scene changed.")
-
-    # TODO:
-    # how to handle multiple scenes after running conversion?
-    # should evaluate original only once and only recompute the converted scene
-    # store results in class and wrapper for eval that runs for the necessary scenes?
-    # how do i store converted scenes?
-    # could store in temp folder or just a list of scenes?
-    # add file size to table? and to eval.py
-    def _eval(self, _):
+    # TODO: add file size to table? and to eval.py
+    def _eval(self, scene_id):
         print("Running evaluation...")
         device = "cuda"
         ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
@@ -235,8 +291,7 @@ class InteractiveConversionTool:
             "elapsed_time": elapsed_time,
             "num_GS": len(self.gaussians.means),
         })
-        self.table_rows += get_table_row("input", stats)
-        self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
+        self.scenes[scene_id].scene_metrics = stats
 
     @torch.no_grad()
     def render_fn(
