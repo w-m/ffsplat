@@ -1,13 +1,14 @@
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import torch
 import yaml
-from plas import sort_with_plas
+from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
 
 from ..io.ply import encode_ply
@@ -26,25 +27,25 @@ class SerializableDumper(yaml.SafeDumper):
     Removes Python-specific type tags from the output.
     """
 
-    def increase_indent(self, flow=False, indentless=False):
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
         return super().increase_indent(flow, False)
 
-    def represent_defaultdict(self, data):
+    def represent_defaultdict(self, data: defaultdict) -> yaml.nodes.MappingNode:
         return self.represent_mapping("tag:yaml.org,2002:map", dict(data).items())
 
-    def represent_torch_size(self, data):
+    def represent_torch_size(self, data: torch.Size) -> yaml.nodes.SequenceNode:
         # Always use flow style for torch.Size
         sequence = self.represent_sequence("tag:yaml.org,2002:seq", list(data))
         sequence.flow_style = True
         return sequence
 
-    def represent_tuple(self, data):
+    def represent_tuple(self, data: tuple) -> yaml.nodes.SequenceNode:
         # Always use flow style for tuples
         sequence = self.represent_sequence("tag:yaml.org,2002:seq", list(data))
         sequence.flow_style = True
         return sequence
 
-    def represent_list(self, data):
+    def represent_list(self, data: Iterable[Any]) -> yaml.nodes.SequenceNode:
         """Special representation for lists based on content."""
         sequence = self.represent_sequence("tag:yaml.org,2002:seq", data)
         # Use flow style for lists that contain only numbers
@@ -52,7 +53,7 @@ class SerializableDumper(yaml.SafeDumper):
             sequence.flow_style = True
         return sequence
 
-    def represent_general(self, data):
+    def represent_general(self, data: Any) -> Any:
         """General representer that handles dataclasses specially."""
         if is_dataclass(data) and not isinstance(data, type):
             return self.represent_mapping("tag:yaml.org,2002:map", asdict(data).items())
@@ -79,7 +80,7 @@ class DecodingParams:
     fields: defaultdict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
     scene: dict[str, Any] = field(default_factory=dict)
 
-    def reverse_fields(self):
+    def reverse_fields(self) -> None:
         """The operations we're accumulation during encoding need to be reversed for decoding."""
         prev_fields = self.fields.copy()
         self.fields = defaultdict(list)
@@ -147,7 +148,7 @@ def minmax(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def indices_of_pruning_to_square_shape(data: Tensor, verbose=False) -> Tensor | slice:
+def indices_of_pruning_to_square_shape(data: Tensor, verbose: bool = False) -> Tensor | slice:
     num_primitives = data.shape[0]
 
     grid_sidelen = int(math.sqrt(num_primitives))
@@ -183,7 +184,7 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
     # TODO untested
     match plas_cfg.scaling_fn:
         case "standardize":
-            normalization_fn = standardize
+            normalization_fn: Callable[[Tensor], Tensor] = standardize
         case "minmax":
             normalization_fn = minmax
         case "none":
@@ -195,24 +196,24 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
 
     attr_getter_fn = lambda attr_name: fields[attr_name][pruned_indices]
 
-    params_to_sort = []
+    params_to_sort: list[Tensor] = []
 
     for attr_name, attr_weight in plas_cfg.weights.items():
         if attr_weight > 0:
             params_to_sort.append(normalization_fn(attr_getter_fn(attr_name)).flatten(start_dim=1) * attr_weight)
 
-    params_to_sort = torch.cat(params_to_sort, dim=1)
+    params_tensor = torch.cat(params_to_sort, dim=1)
 
     if plas_cfg.shuffle:
         # TODO shuffling should be an option of sort_with_plas
         torch.manual_seed(42)
-        shuffled_indices = torch.randperm(params_to_sort.shape[0], device=params_to_sort.device)
-        params_to_sort = params_to_sort[shuffled_indices]
+        shuffled_indices = torch.randperm(params_tensor.shape[0], device=params_tensor.device)
+        params_tensor = params_tensor[shuffled_indices]
 
-    grid_to_sort = as_grid_img(params_to_sort).permute(2, 0, 1).to("cuda")
-    _, sorted_indices = sort_with_plas(grid_to_sort, improvement_break=plas_cfg.improvement_break, verbose=True)
+    grid_to_sort = as_grid_img(params_tensor).permute(2, 0, 1).to("cuda")
+    _, sorted_indices_ret = sort_with_plas(grid_to_sort, improvement_break=plas_cfg.improvement_break, verbose=True)
 
-    sorted_indices = sorted_indices.squeeze(0).to(params_to_sort.device)
+    sorted_indices: Tensor = sorted_indices_ret.squeeze(0).to(params_tensor.device)
 
     if plas_cfg.shuffle:
         flat_indices = sorted_indices.flatten()
@@ -236,6 +237,8 @@ class SceneEncoder:
             field_data = self.fields.get(field_name)
 
             for field_op in field_config:
+                if field_data is None:
+                    raise ValueError(f"Field '{field_name}' not found in input fields.")
                 match field_op:
                     case {
                         "split": {
@@ -244,8 +247,8 @@ class SceneEncoder:
                             "dim": dim,
                         }
                     }:
-                        field_data = field_data.split(split_size_or_sections, dim)
-                        for i, chunk in enumerate(field_data):
+                        chunks = field_data.split(split_size_or_sections, dim)
+                        for i, chunk in enumerate(chunks):
                             self.fields[f"{to_fields_with_prefix}{i}"] = chunk.squeeze(dim)
 
                         self.decoding_params.fields[field_name].append({
@@ -264,11 +267,11 @@ class SceneEncoder:
                             "squeeze": squeeze,
                         }
                     }:
-                        field_data = field_data.split(split_size_or_sections, dim)
-                        for target_field_name, target_field_data in zip(to_field_list, field_data):
+                        chunks = field_data.split(split_size_or_sections, dim)
+                        for target_field_name, chunk in zip(to_field_list, chunks):
                             if squeeze:
-                                target_field_data = target_field_data.squeeze(dim)
-                            self.fields[target_field_name] = target_field_data
+                                chunk = chunk.squeeze(dim)
+                            self.fields[target_field_name] = chunk
 
                         self.decoding_params.fields[field_name].append({
                             "combine": {
@@ -294,6 +297,9 @@ class SceneEncoder:
                         field_min = field_data.min().item()
                         field_max = field_data.max().item()
 
+                        min_val_f = float(min_val)
+                        max_val_f = float(max_val)
+
                         self.decoding_params.fields[field_name].append({
                             "remapping": {
                                 "method": "minmax",
@@ -303,7 +309,7 @@ class SceneEncoder:
                         })
 
                         field_data = minmax(field_data)
-                        field_data = field_data * (max_val - min_val) + min_val
+                        field_data = field_data * (min_val_f - max_val_f) + max_val_f
 
                     case {"reindex": {"index_field": index_field_name}}:
                         index_field = self.fields[index_field_name]
@@ -325,14 +331,16 @@ class SceneEncoder:
                         self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
                         field_data = field_data.permute(*dims)
 
-                    case {"plas": plas_cfg_dict}:
-                        field_data = plas_preprocess(
+                    case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
+                        sorted_indices = plas_preprocess(
                             plas_cfg=PLASConfig(**plas_cfg_dict),
                             fields=self.fields,
                         )
-                    case {"to_dtype": {"dtype": dtype}}:
+                        field_data = sorted_indices
+
+                    case {"to_dtype": {"dtype": dtype_str}}:
                         self.decoding_params.fields[field_name].append({"to_dtype": str(field_data.dtype)})
-                        match dtype:
+                        match dtype_str:
                             case "uint8":
                                 if field_data.min() < 0 or field_data.max() > 255:
                                     raise ValueError(
@@ -342,14 +350,17 @@ class SceneEncoder:
                             case "uint16":
                                 if field_data.min() < 0 or field_data.max() > 65535:
                                     raise ValueError(
-                                        f"Field data out of range for uint16 conversion: {field_data.min()} - {field_data.max()}"
+                                        f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
                                     )
                                 field_data = field_data.to(torch.uint16)
                             case _:
-                                raise ValueError(f"Unsupported dtype for conversion: {dtype}")
+                                raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
 
                     case _:
                         raise ValueError(f"Unsupported field operation: {field_op}")
+
+            if field_data is not None:
+                self.fields[field_name] = field_data
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
@@ -389,6 +400,10 @@ class SceneEncoder:
     def encode(self) -> None:
         # container as folder for now
         self.output_path.mkdir(parents=True, exist_ok=True)
+
+        # empty base field for PLAS, which picks several input fields
+        # TODO review design
+        self.fields["_"] = torch.empty(0)
 
         self._encode_fields()
         self._write_files()

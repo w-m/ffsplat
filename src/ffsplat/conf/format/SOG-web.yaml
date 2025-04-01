@@ -18,7 +18,7 @@ fields:
         dim: 1
         squeeze: false
 
-  sorted_indices:
+  _:
     - plas:
         prune_by: opacities
         scaling_fn: standardize
@@ -89,7 +89,6 @@ fields:
         max: 255.0
     - to_dtype:
         dtype: uint8
-    - to_field: opacities
 
 files:
   - file_path: opacities.png

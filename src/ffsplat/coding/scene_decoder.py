@@ -45,7 +45,7 @@ class DecodingParams:
 class SceneDecoder:
     decoding_params: DecodingParams
     fields: dict[str, Tensor] = field(default_factory=dict)
-    scene: Any = None
+    scene: Gaussians = field(init=False)
 
     def _decode_files(self) -> None:
         for file in self.decoding_params.files:
