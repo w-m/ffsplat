@@ -230,65 +230,6 @@ class SceneEncoder:
 
     fields: dict[str, Tensor] = field(default_factory=dict)
 
-    # encoding YAML
-
-    # fields:
-    #   sh:
-    #     - split:
-    #         to_field_list: [f_dc, f_rest]
-    #         split_size_or_sections: [1, 15]
-    #         dim: 1
-
-    #   f_dc:
-    #     - reshape:
-    #         shape: [-1, 3]
-    #     - split:
-    #         to_fields_with_prefix: point_cloud.ply@f_dc_
-    #         split_size_or_sections: 1
-    #         dim: 1
-
-    #   f_rest:
-    #     # TODO what is the correct order of f_rest?
-    #     # requires reshape / permute?
-    #     - reshape:
-    #         shape: [-1, 45]
-    #     - split:
-    #         to_fields_with_prefix: point_cloud.ply@f_rest_
-    #         split_size_or_sections: 1
-    #         dim: 1
-
-    #   quaternions:
-    #     - split:
-    #         to_fields_with_prefix: point_cloud.ply@rot_
-    #         split_size_or_sections: 1
-    #         dim: 1
-
-    #   means:
-    #     - split:
-    #         to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
-    #         split_size_or_sections: 1
-    #         dim: 1
-
-    #   scales:
-    #     - remapping:
-    #         method: exp
-    #         inverse: True
-    #     - split:
-    #         to_fields_with_prefix: point_cloud.ply@scale_
-    #         split_size_or_sections: 1
-    #         dim: 1
-
-    #   opacities:
-    #     - remapping:
-    #         method: sigmoid
-    #         inverse: True
-    #     - to_field: point_cloud.ply@opacity
-
-    # files:
-    #   - file_path: "point_cloud.ply"
-    #     type: ply
-    #     fields_with_prefix: point_cloud.ply@
-
     def _encode_fields(self) -> None:
         # go through the fields of encoding params
         for field_name, field_config in self.encoding_params.fields.items():

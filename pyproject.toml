@@ -78,6 +78,7 @@ dev = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
+    "types-pyyaml>=6.0.12.20250326",
 ]
 
 [build-system]
@@ -86,7 +87,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.mypy]
 files = ["src"]
-exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*"]
+exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
