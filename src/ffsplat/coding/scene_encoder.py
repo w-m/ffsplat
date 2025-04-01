@@ -351,12 +351,18 @@ class SceneEncoder:
                     case {"to_field": name}:
                         self.decoding_params.fields[field_name].append({"from_field": name})
                         self.fields[name] = field_data
+
+                    case {"to_tmp_field": name}:
+                        # a field that is used during the encoding process, but is not required for decoding
+                        # and is not stored in the output
+                        self.fields[name] = field_data
+
                     case {"permute": {"dims": dims}}:
                         self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
                         field_data = field_data.permute(*dims)
 
                     case {"plas": plas_cfg_dict}:
-                        plas_preprocess(
+                        field_data = plas_preprocess(
                             plas_cfg=PLASConfig(**plas_cfg_dict),
                             fields=self.fields,
                         )

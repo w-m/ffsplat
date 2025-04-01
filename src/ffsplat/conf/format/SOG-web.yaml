@@ -32,7 +32,7 @@ fields:
           opacities: 0.0
           scales: 1.0
           quaternions: 0.0
-    - to_field: sorted_indices
+    - to_tmp_field: sorted_indices
 
   f_dc:
     - reshape:
