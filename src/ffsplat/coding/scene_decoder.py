@@ -24,6 +24,14 @@ class DecodingParams:
             data = yaml.safe_load(f)
         return cls(files=data.get("files", []), fields=data.get("fields", {}), scene=data.get("scene", {}))
 
+    @classmethod
+    def from_container_folder(cls, folder_path: Path) -> "DecodingParams":
+        dec_params = cls.from_yaml_file(folder_path / "container_meta.yaml")
+        for file in dec_params.files:
+            file_path = folder_path / file["file_path"]
+            file["file_path"] = str(file_path)
+        return dec_params
+
     def with_input_path(self, input_path: Path) -> "DecodingParams":
         # check that we have a single file only, replace its path with the input path
         if len(self.files) != 1:
@@ -145,15 +153,17 @@ class SceneDecoder:
 def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
     input_file_extension = input_path.suffix
 
-    if input_format == "3DGS-INRIA.ply" and input_file_extension == ".ply":
-        decoding_params = DecodingParams.from_yaml_file(Path("3DGS_INRIA_ply_decoding_template.yaml")).with_input_path(
-            input_path
-        )
+    if input_format == "3DGS-INRIA.ply":
+        if input_file_extension == ".ply":
+            decoding_params = DecodingParams.from_yaml_file(
+                Path("3DGS_INRIA_ply_decoding_template.yaml")
+            ).with_input_path(input_path)
+        else:
+            raise ValueError("Input file must be a .ply file for 3DGS-INRIA format")
     elif input_format == "smurfx":
-        # check input_path is a directory
         if not input_path.is_dir():
             raise ValueError("Input path must be a directory for smurfx format")
-        decoding_params = DecodingParams.from_yaml_file(input_path / Path("container_meta.yaml"))
+        decoding_params = DecodingParams.from_container_folder(input_path)
     else:
         raise ValueError(f"Unsupported input format: {input_format}")
 
