@@ -24,7 +24,8 @@ fields:
         scaling_fn: standardize
         # activated: true
         shuffle: true
-        improvement_break: 0.0001
+        # improvement_break: 0.0001
+        improvement_break: 0.001
         weights:
           means: 1.0
           f_dc: 1.0
@@ -78,11 +79,22 @@ fields:
         squeeze: true
 
   opacities:
+    - reindex:
+        index_field: sorted_indices
     - remapping:
         method: inverse-sigmoid
-    - to_field: point_cloud.ply@opacity
+    - remapping:
+        method: minmax
+        min: 0.0
+        max: 255.0
+    - to_dtype:
+        dtype: uint8
+    - to_field: opacities
 
 files:
+  - file_path: opacities.png
+    type: png
+    from_field: opacities
   - file_path: "point_cloud.ply"
     type: ply
     fields_with_prefix: point_cloud.ply@

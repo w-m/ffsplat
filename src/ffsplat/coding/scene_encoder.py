@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
+import cv2
 import torch
 import yaml
 from plas import sort_with_plas
@@ -211,7 +212,7 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
     grid_to_sort = as_grid_img(params_to_sort).permute(2, 0, 1).to("cuda")
     _, sorted_indices = sort_with_plas(grid_to_sort, improvement_break=plas_cfg.improvement_break, verbose=True)
 
-    sorted_indices = sorted_indices.to(params_to_sort.device)
+    sorted_indices = sorted_indices.squeeze(0).to(params_to_sort.device)
 
     if plas_cfg.shuffle:
         flat_indices = sorted_indices.flatten()
@@ -348,6 +349,28 @@ class SceneEncoder:
                         self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
                         field_data = torch.log(field_data / (1 - field_data))
 
+                    case {"remapping": {"method": "minmax", "min": min_val, "max": max_val}}:
+                        field_min = field_data.min().item()
+                        field_max = field_data.max().item()
+
+                        self.decoding_params.fields[field_name].append({
+                            "remapping": {
+                                "method": "minmax",
+                                "min": field_min,
+                                "max": field_max,
+                            }
+                        })
+
+                        field_data = minmax(field_data)
+                        field_data = field_data * (max_val - min_val) + min_val
+
+                    case {"reindex": {"index_field": index_field_name}}:
+                        index_field = self.fields[index_field_name]
+                        if len(index_field.shape) != 2:
+                            raise ValueError("Expecting grid for re-index operation")
+                        self.decoding_params.fields[field_name].append({"flatten": {"dims": [0, 1]}})
+                        field_data = field_data[index_field]
+
                     case {"to_field": name}:
                         self.decoding_params.fields[field_name].append({"from_field": name})
                         self.fields[name] = field_data
@@ -366,34 +389,61 @@ class SceneEncoder:
                             plas_cfg=PLASConfig(**plas_cfg_dict),
                             fields=self.fields,
                         )
+                    case {"to_dtype": {"dtype": dtype}}:
+                        self.decoding_params.fields[field_name].append({"to_dtype": str(field_data.dtype)})
+                        match dtype:
+                            case "uint8":
+                                if field_data.min() < 0 or field_data.max() > 255:
+                                    raise ValueError(
+                                        f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                                    )
+                                field_data = field_data.to(torch.uint8)
+                            case "uint16":
+                                if field_data.min() < 0 or field_data.max() > 65535:
+                                    raise ValueError(
+                                        f"Field data out of range for uint16 conversion: {field_data.min()} - {field_data.max()}"
+                                    )
+                                field_data = field_data.to(torch.uint16)
+                            case _:
+                                raise ValueError(f"Unsupported dtype for conversion: {dtype}")
+
                     case _:
                         raise ValueError(f"Unsupported field operation: {field_op}")
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
-            file_path = file["file_path"]
-            file_type = file["type"]
-            field_prefix = file["fields_with_prefix"]
+            match file:
+                case {"file_path": file_path, "type": "ply", "fields_with_prefix": field_prefix}:
+                    fields_to_write = {
+                        field_name[len(field_prefix) :]: field_data
+                        for field_name, field_data in self.fields.items()
+                        if field_name.startswith(field_prefix)
+                    }
 
-            fields_to_write = {
-                field_name[len(field_prefix) :]: field_data
-                for field_name, field_data in self.fields.items()
-                if field_name.startswith(field_prefix)
-            }
+                    self.decoding_params.files.append({
+                        "file_path": file_path,
+                        "type": "ply",
+                        "field_prefix": field_prefix,
+                    })
 
-            self.decoding_params.files.append({
-                "file_path": file_path,
-                "type": file_type,
-                "field_prefix": field_prefix,
-            })
+                    output_file_path = self.output_path / file_path
 
-            output_file_path = self.output_path / file_path
-
-            match file_type:
-                case "ply":
                     encode_ply(fields=fields_to_write, path=output_file_path)
-                case _:
-                    raise NotImplementedError(f"Encoding for {file_type} is not supported")
+                case {"file_path": file_path, "type": file_type, "from_field": field_name}:
+                    field_data = self.fields[field_name]
+                    output_file_path = self.output_path / file_path
+
+                    self.decoding_params.files.append({
+                        "file_path": file_path,
+                        "type": file_type,
+                        "field_name": field_name,
+                    })
+
+                    match file_type:
+                        case "png":
+                            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
+                        case _:
+                            raise ValueError(f"Unsupported file type: {file_type}")
 
     def encode(self) -> None:
         # container as folder for now
