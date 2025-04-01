@@ -150,8 +150,6 @@ ignore = [
     "F722",
     # Checks for long exception messages that are not defined in the exception class itself, doesn't allow `ValueError("message")`
     "TRY003",
-    # TODO: re-enable (code complexity)
-    "C901",
 ]
 
 [tool.ruff.lint.per-file-ignores]

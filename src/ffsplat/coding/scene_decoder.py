@@ -60,7 +60,7 @@ class SceneDecoder:
                 case _:
                     raise ValueError(f"Unsupported file type: {type}")
 
-    def _process_field(self, field_op: dict[str, Any], field_data: Tensor | None) -> Tensor:
+    def _process_field(self, field_op: dict[str, Any], field_data: Tensor | None) -> Tensor:  # noqa: C901
         match field_op:
             case {"combine": {"from_fields_with_prefix": from_prefix, "method": method, "dim": dim}}:
                 prefix_tensors: list[Tensor] = [

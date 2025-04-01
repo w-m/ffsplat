@@ -237,130 +237,134 @@ class SceneEncoder:
             field_data = self.fields.get(field_name)
 
             for field_op in field_config:
-                if field_data is None:
-                    raise ValueError(f"Field '{field_name}' not found in input fields.")
-                match field_op:
-                    case {
-                        "split": {
-                            "to_fields_with_prefix": to_fields_with_prefix,
-                            "split_size_or_sections": split_size_or_sections,
-                            "dim": dim,
-                        }
-                    }:
-                        chunks = field_data.split(split_size_or_sections, dim)
-                        for i, chunk in enumerate(chunks):
-                            self.fields[f"{to_fields_with_prefix}{i}"] = chunk.squeeze(dim)
+                if isinstance(field_op, dict):
+                    if field_data is None:
+                        raise ValueError(f"Field '{field_name}' not found in input fields.")
+                    field_data = self._process_field(field_name, field_op, field_data)
+                    self.fields[field_name] = field_data
 
-                        self.decoding_params.fields[field_name].append({
-                            "combine": {
-                                "from_fields_with_prefix": to_fields_with_prefix,
-                                "method": "stack" if split_size_or_sections == 1 else "concat",
-                                "dim": dim,
-                            }
-                        })
+    def _process_field(self, field_name: str, field_op: dict[str, Any], field_data: Tensor) -> Tensor:  # noqa: C901
+        match field_op:
+            case {
+                "split": {
+                    "to_fields_with_prefix": to_fields_with_prefix,
+                    "split_size_or_sections": split_size_or_sections,
+                    "dim": dim,
+                }
+            }:
+                chunks = field_data.split(split_size_or_sections, dim)
+                for i, chunk in enumerate(chunks):
+                    self.fields[f"{to_fields_with_prefix}{i}"] = chunk.squeeze(dim)
 
-                    case {
-                        "split": {
-                            "to_field_list": to_field_list,
-                            "split_size_or_sections": split_size_or_sections,
-                            "dim": dim,
-                            "squeeze": squeeze,
-                        }
-                    }:
-                        chunks = field_data.split(split_size_or_sections, dim)
-                        for target_field_name, chunk in zip(to_field_list, chunks):
-                            if squeeze:
-                                chunk = chunk.squeeze(dim)
-                            self.fields[target_field_name] = chunk
+                self.decoding_params.fields[field_name].append({
+                    "combine": {
+                        "from_fields_with_prefix": to_fields_with_prefix,
+                        "method": "stack" if split_size_or_sections == 1 else "concat",
+                        "dim": dim,
+                    }
+                })
 
-                        self.decoding_params.fields[field_name].append({
-                            "combine": {
-                                "from_field_list": to_field_list,
-                                "method": "stack" if split_size_or_sections == 1 else "concat",
-                                "dim": dim,
-                            }
-                        })
+            case {
+                "split": {
+                    "to_field_list": to_field_list,
+                    "split_size_or_sections": split_size_or_sections,
+                    "dim": dim,
+                    "squeeze": squeeze,
+                }
+            }:
+                chunks = field_data.split(split_size_or_sections, dim)
+                for target_field_name, chunk in zip(to_field_list, chunks):
+                    if squeeze:
+                        chunk = chunk.squeeze(dim)
+                    self.fields[target_field_name] = chunk
 
-                    case {"reshape": {"shape": shape}}:
-                        self.decoding_params.fields[field_name].append({"reshape": {"shape": field_data.shape}})
-                        field_data = field_data.reshape(*shape)
+                self.decoding_params.fields[field_name].append({
+                    "combine": {
+                        "from_field_list": to_field_list,
+                        "method": "stack" if split_size_or_sections == 1 else "concat",
+                        "dim": dim,
+                    }
+                })
 
-                    case {"remapping": {"method": "log"}}:
-                        self.decoding_params.fields[field_name].append({"remapping": {"method": "exp"}})
-                        field_data = field_data.log()
+            case {"reshape": {"shape": shape}}:
+                self.decoding_params.fields[field_name].append({"reshape": {"shape": field_data.shape}})
+                field_data = field_data.reshape(*shape)
 
-                    case {"remapping": {"method": "inverse-sigmoid"}}:
-                        self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
-                        field_data = torch.log(field_data / (1 - field_data))
+            case {"remapping": {"method": "log"}}:
+                self.decoding_params.fields[field_name].append({"remapping": {"method": "exp"}})
+                field_data = field_data.log()
 
-                    case {"remapping": {"method": "minmax", "min": min_val, "max": max_val}}:
-                        field_min = field_data.min().item()
-                        field_max = field_data.max().item()
+            case {"remapping": {"method": "inverse-sigmoid"}}:
+                self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
+                field_data = torch.log(field_data / (1 - field_data))
 
-                        min_val_f = float(min_val)
-                        max_val_f = float(max_val)
+            case {"remapping": {"method": "minmax", "min": min_val, "max": max_val}}:
+                field_min = field_data.min().item()
+                field_max = field_data.max().item()
 
-                        self.decoding_params.fields[field_name].append({
-                            "remapping": {
-                                "method": "minmax",
-                                "min": field_min,
-                                "max": field_max,
-                            }
-                        })
+                min_val_f = float(min_val)
+                max_val_f = float(max_val)
 
-                        field_data = minmax(field_data)
-                        field_data = field_data * (min_val_f - max_val_f) + max_val_f
+                self.decoding_params.fields[field_name].append({
+                    "remapping": {
+                        "method": "minmax",
+                        "min": field_min,
+                        "max": field_max,
+                    }
+                })
 
-                    case {"reindex": {"index_field": index_field_name}}:
-                        index_field = self.fields[index_field_name]
-                        if len(index_field.shape) != 2:
-                            raise ValueError("Expecting grid for re-index operation")
-                        self.decoding_params.fields[field_name].append({"flatten": {"dims": [0, 1]}})
-                        field_data = field_data[index_field]
+                field_data = minmax(field_data)
+                field_data = field_data * (min_val_f - max_val_f) + max_val_f
 
-                    case {"to_field": name}:
-                        self.decoding_params.fields[field_name].append({"from_field": name})
-                        self.fields[name] = field_data
+            case {"reindex": {"index_field": index_field_name}}:
+                index_field = self.fields[index_field_name]
+                if len(index_field.shape) != 2:
+                    raise ValueError("Expecting grid for re-index operation")
+                self.decoding_params.fields[field_name].append({"flatten": {"dims": [0, 1]}})
+                field_data = field_data[index_field]
 
-                    case {"to_tmp_field": name}:
-                        # a field that is used during the encoding process, but is not required for decoding
-                        # and is not stored in the output
-                        self.fields[name] = field_data
+            case {"to_field": name}:
+                self.decoding_params.fields[field_name].append({"from_field": name})
+                self.fields[name] = field_data
 
-                    case {"permute": {"dims": dims}}:
-                        self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
-                        field_data = field_data.permute(*dims)
+            case {"to_tmp_field": name}:
+                # a field that is used during the encoding process, but is not required for decoding
+                # and is not stored in the output
+                self.fields[name] = field_data
 
-                    case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
-                        sorted_indices = plas_preprocess(
-                            plas_cfg=PLASConfig(**plas_cfg_dict),
-                            fields=self.fields,
-                        )
-                        field_data = sorted_indices
+            case {"permute": {"dims": dims}}:
+                self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
+                field_data = field_data.permute(*dims)
 
-                    case {"to_dtype": {"dtype": dtype_str}}:
-                        self.decoding_params.fields[field_name].append({"to_dtype": str(field_data.dtype)})
-                        match dtype_str:
-                            case "uint8":
-                                if field_data.min() < 0 or field_data.max() > 255:
-                                    raise ValueError(
-                                        f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                                    )
-                                field_data = field_data.to(torch.uint8)
-                            case "uint16":
-                                if field_data.min() < 0 or field_data.max() > 65535:
-                                    raise ValueError(
-                                        f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                                    )
-                                field_data = field_data.to(torch.uint16)
-                            case _:
-                                raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+            case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
+                sorted_indices = plas_preprocess(
+                    plas_cfg=PLASConfig(**plas_cfg_dict),
+                    fields=self.fields,
+                )
+                field_data = sorted_indices
 
+            case {"to_dtype": {"dtype": dtype_str}}:
+                self.decoding_params.fields[field_name].append({"to_dtype": str(field_data.dtype)})
+                match dtype_str:
+                    case "uint8":
+                        if field_data.min() < 0 or field_data.max() > 255:
+                            raise ValueError(
+                                f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                            )
+                        field_data = field_data.to(torch.uint8)
+                    case "uint16":
+                        if field_data.min() < 0 or field_data.max() > 65535:
+                            raise ValueError(
+                                f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                            )
+                        field_data = field_data.to(torch.uint16)
                     case _:
-                        raise ValueError(f"Unsupported field operation: {field_op}")
+                        raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
 
-            if field_data is not None:
-                self.fields[field_name] = field_data
+            case _:
+                raise ValueError(f"Unsupported field operation: {field_op}")
+
+        return field_data
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
