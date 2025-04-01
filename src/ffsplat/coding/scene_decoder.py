@@ -2,12 +2,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import cv2
 import torch
 import yaml
 from torch import Tensor
 
 from ..io.ply import decode_ply
 from ..models.gaussians import Gaussians
+
+
+# TODO duplicated code, scene_encoder
+def minmax(tensor: Tensor) -> Tensor:
+    """Scale a tensor to the range [0, 1]."""
+    tensor = tensor - tensor.min()
+    if tensor.max() - tensor.min() > 0:
+        tensor = tensor / (tensor.max() - tensor.min())
+    return tensor
 
 
 @dataclass
@@ -49,16 +59,17 @@ class SceneDecoder:
 
     def _decode_files(self) -> None:
         for file in self.decoding_params.files:
-            file_path = Path(file["file_path"])
-            file_type = file["type"]
-            field_prefix = file["field_prefix"]
-
-            match file_type:
-                case "ply":
-                    ply_fields = decode_ply(file_path=file_path, field_prefix=field_prefix)
+            match file:
+                case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
+                    ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
                     self.fields.update(ply_fields)
+                case {"file_path": file_path, "type": "png", "field_name": field_name}:
+                    png_field = torch.tensor(
+                        cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_ANYCOLOR)
+                    )
+                    self.fields[field_name] = png_field
                 case _:
-                    raise ValueError(f"Unsupported file type: {type}")
+                    raise ValueError("Unsupported file format")
 
     def _process_field(self, field_op: dict[str, Any], field_data: Tensor | None) -> Tensor:  # noqa: C901
         match field_op:
@@ -88,6 +99,11 @@ class SceneDecoder:
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
 
+            case {"flatten": {"start_dim": start_dim, "end_dim": end_dim}}:
+                if field_data is None:
+                    raise ValueError("Field data is None before flatten")
+                field_data = field_data.flatten(start_dim=start_dim, end_dim=end_dim)
+
             case {"from_field": name}:
                 if name in self.fields:
                     field_data = self.fields[name]
@@ -104,6 +120,12 @@ class SceneDecoder:
                     raise ValueError("Field data is None before permute")
                 field_data = field_data.permute(*dims)
 
+            case {"remapping": {"method": method, "min": min_val, "max": max_val}}:
+                if field_data is None:
+                    raise ValueError("Field data is None before remapping")
+                field_data_norm = minmax(field_data)
+                field_data = (field_data_norm * (max_val - min_val)) + min_val
+
             case {"remapping": {"method": method}}:
                 if field_data is None:
                     raise ValueError("Field data is None before remapping")
@@ -115,14 +137,44 @@ class SceneDecoder:
                         field_data = torch.sigmoid(field_data)
                     case _:
                         raise ValueError(f"Unsupported remapping method: {method}")
+            case {"assign": {"field_name": field_name}}:
+                if field_name in self.fields:
+                    field_data = self.fields[field_name]
+                else:
+                    raise ValueError(f"Field not found for assignment: {field_name}")
+
+            case {"to_dtype": {"dtype": dtype_str}}:
+                if field_data is None:
+                    raise ValueError("Field data is None before dtype conversion")
+                match dtype_str:
+                    case "uint8":
+                        if field_data.min() < 0 or field_data.max() > 255:
+                            raise ValueError(
+                                f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                            )
+                        field_data = field_data.to(torch.uint8)
+                    case "uint16":
+                        if field_data.min() < 0 or field_data.max() > 65535:
+                            raise ValueError(
+                                f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                            )
+                        field_data = field_data.to(torch.uint16)
+                    case "float32":
+                        field_data = field_data.to(torch.float32)
+                    case _:
+                        raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+
             case _:
                 raise ValueError(f"Unsupported field operation: {field_op}")
 
+        if field_data is None:
+            raise ValueError("Field data is None after processing field operation")
         return field_data
 
     def _process_fields(self) -> None:
         for field_name, field_ops in self.decoding_params.fields.items():
-            field_data = None
+            field_data = self.fields.get(field_name, None)
+
             for field_op in field_ops:
                 field_data = self._process_field(field_op, field_data)
 

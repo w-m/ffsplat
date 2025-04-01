@@ -320,7 +320,7 @@ class SceneEncoder:
                 index_field = self.fields[index_field_name]
                 if len(index_field.shape) != 2:
                     raise ValueError("Expecting grid for re-index operation")
-                self.decoding_params.fields[field_name].append({"flatten": {"dims": [0, 1]}})
+                self.decoding_params.fields[field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
                 field_data = field_data[index_field]
 
             case {"to_field": name}:
@@ -344,7 +344,13 @@ class SceneEncoder:
                 field_data = sorted_indices
 
             case {"to_dtype": {"dtype": dtype_str}}:
-                self.decoding_params.fields[field_name].append({"to_dtype": str(field_data.dtype)})
+                torch_dtype_to_str = {
+                    torch.float32: "float32",
+                }
+
+                self.decoding_params.fields[field_name].append({
+                    "to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}
+                })
                 match dtype_str:
                     case "uint8":
                         if field_data.min() < 0 or field_data.max() > 255:
