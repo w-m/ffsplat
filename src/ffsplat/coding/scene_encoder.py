@@ -8,11 +8,15 @@ from typing import Any, Callable
 import cv2
 import torch
 import yaml
+from PIL import Image
+from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
 
 from ..io.ply import encode_ply
 from ..models.gaussians import Gaussians
+
+register_avif_opener()
 
 
 class SerializableDumper(yaml.SafeDumper):
@@ -231,6 +235,18 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
         return primitive_filter[sorted_indices]
 
     return sorted_indices
+
+
+def write_image(output_file_path: Path, field_data: Tensor, file_type: str) -> None:
+    match file_type:
+        case "png":
+            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
+        case "avif":
+            Image.fromarray(field_data.cpu().numpy()).save(
+                output_file_path, format="AVIF", quality=-1, chroma=444, matrix_coefficients=0
+            )
+        case _:
+            raise ValueError(f"Unsupported file type: {file_type}")
 
 
 @dataclass
@@ -473,7 +489,7 @@ class SceneEncoder:
                     encode_ply(fields=fields_to_write, path=output_file_path)
                 case {"from_field": field_name, "type": file_type}:
                     field_data = self.fields[field_name]
-                    file_path = f"{field_name}.png"
+                    file_path = f"{field_name}.{file_type}"
                     output_file_path = self.output_path / file_path
 
                     self.decoding_params.files.append({
@@ -482,25 +498,21 @@ class SceneEncoder:
                         "field_name": field_name,
                     })
 
-                    match file_type:
-                        case "png":
-                            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
-                        case _:
-                            raise ValueError(f"Unsupported file type: {file_type}")
+                    write_image(output_file_path, field_data, file_type)
 
                 case {
                     "from_fields_with_prefix": field_prefix,
-                    "type": "png",
+                    "type": file_type,
                 }:
                     for field_name, field_data in self.fields.items():
                         if field_name.startswith(field_prefix):
-                            file_path = f"{field_name}.png"
+                            file_path = f"{field_name}.{file_type}"
                             output_file_path = self.output_path / file_path
-                            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
+                            write_image(output_file_path, field_data, file_type)
 
                             self.decoding_params.files.append({
                                 "file_path": file_path,
-                                "type": "png",
+                                "type": file_type,
                                 "field_name": field_name,
                             })
 

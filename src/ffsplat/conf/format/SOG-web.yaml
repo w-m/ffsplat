@@ -136,14 +136,14 @@ fields:
 
 files:
   - from_field: opacities
-    type: png
+    type: avif
   - from_field: scales
-    type: png
+    type: avif
   - from_fields_with_prefix: means_bytes_
-    type: png
+    type: avif
   - from_field: quaternions
-    type: png
+    type: avif
   - from_field: f_dc
-    type: png
+    type: avif
   - from_fields_with_prefix: f_rest_
-    type: png
+    type: avif

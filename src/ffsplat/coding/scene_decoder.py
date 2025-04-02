@@ -3,12 +3,18 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import numpy as np
 import torch
 import yaml
+from PIL import Image
+from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from torch import Tensor
 
 from ..io.ply import decode_ply
 from ..models.gaussians import Gaussians
+
+# Register AVIF support
+register_avif_opener()
 
 
 # TODO duplicated code, scene_encoder
@@ -63,11 +69,17 @@ class SceneDecoder:
                 case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
                     ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
                     self.fields.update(ply_fields)
-                case {"file_path": file_path, "type": "png", "field_name": field_name}:
-                    png_field = torch.tensor(
-                        cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_ANYCOLOR)
-                    )
-                    self.fields[field_name] = png_field
+                case {"file_path": file_path, "type": file_type, "field_name": field_name}:
+                    match file_type:
+                        case "png":
+                            img_field = torch.tensor(
+                                cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+                            )
+                        case "avif":
+                            img_field = torch.tensor(np.array(Image.open(file_path)))
+
+                    self.fields[field_name] = img_field
+
                 case _:
                     raise ValueError("Unsupported file format")
 
