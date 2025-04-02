@@ -67,6 +67,6 @@ fields:
     - to_field: point_cloud.ply@opacity
 
 files:
-  - file_path: "point_cloud.ply"
+  - from_fields_with_prefix: point_cloud.ply@
     type: ply
-    fields_with_prefix: point_cloud.ply@
+    file_path: point_cloud.ply

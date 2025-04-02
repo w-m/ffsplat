@@ -375,7 +375,7 @@ class SceneEncoder:
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
             match file:
-                case {"file_path": file_path, "type": "ply", "fields_with_prefix": field_prefix}:
+                case {"from_fields_with_prefix": field_prefix, "type": "ply", "file_path": file_path}:
                     fields_to_write = {
                         field_name[len(field_prefix) :]: field_data
                         for field_name, field_data in self.fields.items()
@@ -391,8 +391,9 @@ class SceneEncoder:
                     output_file_path = self.output_path / file_path
 
                     encode_ply(fields=fields_to_write, path=output_file_path)
-                case {"file_path": file_path, "type": file_type, "from_field": field_name}:
+                case {"from_field": field_name, "type": file_type}:
                     field_data = self.fields[field_name]
+                    file_path = f"{field_name}.png"
                     output_file_path = self.output_path / file_path
 
                     self.decoding_params.files.append({
@@ -406,6 +407,25 @@ class SceneEncoder:
                             cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
                         case _:
                             raise ValueError(f"Unsupported file type: {file_type}")
+
+                case {
+                    "from_fields_with_prefix": field_prefix,
+                    "type": "png",
+                }:
+                    for field_name, field_data in self.fields.items():
+                        if field_name.startswith(field_prefix):
+                            file_path = f"{field_name}.png"
+                            output_file_path = self.output_path / file_path
+                            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
+
+                            self.decoding_params.files.append({
+                                "file_path": file_path,
+                                "type": "png",
+                                "field_name": field_name,
+                            })
+
+                case _:
+                    raise ValueError(f"Unsupported file format: {file}")
 
     def encode(self) -> None:
         # container as folder for now

@@ -25,7 +25,7 @@ fields:
         # activated: true
         shuffle: true
         # improvement_break: 0.0001
-        improvement_break: 0.001
+        improvement_break: 0.1
         weights:
           means: 1.0
           f_dc: 1.0
@@ -38,45 +38,64 @@ fields:
   f_dc:
     - reshape:
         shape: [-1, 3]
-    - split:
-        to_fields_with_prefix: point_cloud.ply@f_dc_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: minmax
+        min: 0.0
+        max: 255.0
+    - to_dtype:
+        dtype: uint8
 
   f_rest:
     - permute:
         dims: [0, 2, 1]
     - reshape:
         shape: [-1, 45]
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: minmax
+        min: 0.0
+        max: 255.0
+    - to_dtype:
+        dtype: uint8
     - split:
-        to_fields_with_prefix: point_cloud.ply@f_rest_
-        split_size_or_sections: 1
-        dim: 1
+        to_fields_with_prefix: f_rest_
+        split_size_or_sections: 3
+        dim: 2
         squeeze: true
 
   quaternions:
-    - split:
-        to_fields_with_prefix: point_cloud.ply@rot_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
-
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: minmax
+        min: 0.0
+        max: 255.0
+    - to_dtype:
+        dtype: uint8
   means:
-    - split:
-        to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: minmax
+        min: 0.0
+        max: 65535.0
+    - to_dtype:
+        dtype: uint16
 
   scales:
+    - reindex:
+        index_field: sorted_indices
     - remapping:
         method: log
-    - split:
-        to_fields_with_prefix: point_cloud.ply@scale_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+    - remapping:
+        method: minmax
+        min: 0.0
+        max: 255.0
+    - to_dtype:
+        dtype: uint8
 
   opacities:
     - reindex:
@@ -91,9 +110,15 @@ fields:
         dtype: uint8
 
 files:
-  - file_path: opacities.png
+  - from_field: opacities
     type: png
-    from_field: opacities
-  - file_path: "point_cloud.ply"
-    type: ply
-    fields_with_prefix: point_cloud.ply@
+  - from_field: scales
+    type: png
+  - from_field: means
+    type: png
+  - from_field: quaternions
+    type: png
+  - from_field: f_dc
+    type: png
+  - from_fields_with_prefix: f_rest_
+    type: png
