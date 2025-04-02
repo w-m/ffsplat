@@ -148,14 +148,15 @@ def minmax(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def indices_of_pruning_to_square_shape(data: Tensor, verbose: bool = False) -> Tensor | slice:
+def primitive_filter_pruning_to_square_shape(data: Tensor, verbose: bool = False) -> Tensor | None:
+    """Returning None indicates that no primitives need to be pruned"""
     num_primitives = data.shape[0]
 
     grid_sidelen = int(math.sqrt(num_primitives))
     num_to_remove = num_primitives - grid_sidelen * grid_sidelen
 
     if num_to_remove == 0:
-        return slice(None)
+        return None
 
     if verbose:
         print(
@@ -179,7 +180,7 @@ def as_grid_img(tensor: Tensor) -> Tensor:
 
 
 def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
-    pruned_indices = indices_of_pruning_to_square_shape(fields[plas_cfg.prune_by])
+    primitive_filter = primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by])
 
     # TODO untested
     match plas_cfg.scaling_fn:
@@ -194,7 +195,9 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
 
     # attr_getter_fn = self.get_activated_attr_flat if sorting_cfg.activated else self.get_attr_flat
 
-    attr_getter_fn = lambda attr_name: fields[attr_name][pruned_indices]
+    attr_getter_fn = (
+        lambda attr_name: fields[attr_name][primitive_filter] if primitive_filter is not None else fields[attr_name]
+    )
 
     params_to_sort: list[Tensor] = []
 
@@ -221,6 +224,9 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
         flat_indices = sorted_indices.flatten()
         unshuffled_flat_indices = shuffled_indices[flat_indices]
         sorted_indices = unshuffled_flat_indices.reshape(sorted_indices.shape)
+
+    if primitive_filter is not None:
+        return primitive_filter[sorted_indices]
 
     return sorted_indices
 

@@ -24,8 +24,8 @@ fields:
         scaling_fn: standardize
         # activated: true
         shuffle: true
-        # improvement_break: 0.0001
-        improvement_break: 0.1
+        improvement_break: 1e-4
+        # improvement_break: 0.1
         weights:
           means: 1.0
           f_dc: 1.0
