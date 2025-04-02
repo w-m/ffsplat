@@ -314,7 +314,7 @@ class SceneEncoder:
                 })
 
                 field_data = minmax(field_data)
-                field_data = field_data * (min_val_f - max_val_f) + max_val_f
+                field_data = field_data * (max_val_f - min_val_f) + min_val_f
 
             case {"reindex": {"index_field": index_field_name}}:
                 index_field = self.fields[index_field_name]
