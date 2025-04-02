@@ -18,6 +18,21 @@ fields:
         dim: 1
         squeeze: false
 
+  means:
+    - remapping:
+        method: signed-log
+    - remapping:
+        method: channelwise-minmax
+        min: 0
+        max: 65535
+        dim: 2
+    - to_dtype:
+        dtype: uint16
+        round_to_int: true
+    - split_bytes:
+        to_fields_with_prefix: means_bytes_
+        num_bytes: 2
+
   _:
     - plas:
         prune_by: opacities
@@ -27,13 +42,22 @@ fields:
         improvement_break: 1e-4
         # improvement_break: 0.1
         weights:
-          means: 1.0
+          means_bytes_0: 0.1
+          means_bytes_1: 1.0
           f_dc: 1.0
           f_rest: 0.0
           opacities: 0.0
           scales: 1.0
           quaternions: 0.0
     - to_tmp_field: sorted_indices
+
+  means_bytes_0:
+    - reindex:
+        index_field: sorted_indices
+
+  means_bytes_1:
+    - reindex:
+        index_field: sorted_indices
 
   f_dc:
     - flatten:
@@ -81,23 +105,6 @@ fields:
     - to_dtype:
         dtype: uint8
         round_to_int: true
-
-  means:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: signed-log
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 65535
-        dim: 2
-    - to_dtype:
-        dtype: uint16
-        round_to_int: true
-    - split_bytes:
-        to_fields_with_prefix: means_bytes_
-        num_bytes: 2
 
   scales:
     - reindex:

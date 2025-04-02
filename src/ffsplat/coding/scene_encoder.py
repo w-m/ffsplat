@@ -203,7 +203,9 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
 
     for attr_name, attr_weight in plas_cfg.weights.items():
         if attr_weight > 0:
-            params_to_sort.append(normalization_fn(attr_getter_fn(attr_name)).flatten(start_dim=1) * attr_weight)
+            params_to_sort.append(
+                normalization_fn(attr_getter_fn(attr_name).to(torch.float32)).flatten(start_dim=1) * attr_weight
+            )
 
     params_tensor = torch.cat(params_to_sort, dim=1)
 
