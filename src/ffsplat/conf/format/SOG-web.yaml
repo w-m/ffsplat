@@ -36,8 +36,8 @@ fields:
     - to_tmp_field: sorted_indices
 
   f_dc:
-    - reshape:
-        shape: [-1, 3]
+    - flatten:
+        start_dim: 1
     - reindex:
         index_field: sorted_indices
     - remapping:
@@ -51,8 +51,8 @@ fields:
   f_rest:
     - permute:
         dims: [0, 2, 1]
-    - reshape:
-        shape: [-1, 45]
+    - flatten:
+        start_dim: 1
     - reindex:
         index_field: sorted_indices
     - remapping:

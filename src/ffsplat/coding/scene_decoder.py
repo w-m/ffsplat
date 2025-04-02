@@ -110,10 +110,11 @@ class SceneDecoder:
                 else:
                     raise ValueError(f"Field not found: {name}")
 
-            case {"reshape": {"shape": shape}}:
+            case {"reshape_from_dim": {"start_dim": start_dim, "shape": shape}}:
                 if field_data is None:
                     raise ValueError("Field data is None before reshape")
-                field_data = field_data.reshape(*shape)
+                target_shape = list(field_data.shape[:start_dim]) + list(shape)
+                field_data = field_data.reshape(*target_shape)
 
             case {"permute": {"dims": dims}}:
                 if field_data is None:

@@ -245,6 +245,13 @@ class SceneEncoder:
 
     def _process_field(self, field_name: str, field_op: dict[str, Any], field_data: Tensor) -> Tensor:  # noqa: C901
         match field_op:
+            case {"flatten": {"start_dim": start_dim}}:
+                target_shape = field_data.shape[start_dim:]
+                self.decoding_params.fields[field_name].append({
+                    "reshape_from_dim": {"start_dim": start_dim, "shape": target_shape}
+                })
+                field_data = field_data.flatten(start_dim=start_dim)
+
             case {
                 "split": {
                     "to_fields_with_prefix": to_fields_with_prefix,

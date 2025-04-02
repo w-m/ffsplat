@@ -19,8 +19,8 @@ fields:
         squeeze: false
 
   f_dc:
-    - reshape:
-        shape: [-1, 3]
+    - flatten:
+        start_dim: 1
     - split:
         to_fields_with_prefix: point_cloud.ply@f_dc_
         split_size_or_sections: 1
@@ -30,8 +30,8 @@ fields:
   f_rest:
     - permute:
         dims: [0, 2, 1]
-    - reshape:
-        shape: [-1, 45]
+    - flatten:
+        start_dim: 1
     - split:
         to_fields_with_prefix: point_cloud.ply@f_rest_
         split_size_or_sections: 1
