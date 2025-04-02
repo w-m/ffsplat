@@ -135,6 +135,8 @@ class SceneDecoder:
                         field_data = torch.exp(field_data)
                     case "sigmoid":
                         field_data = torch.sigmoid(field_data)
+                    case "signed-exp":
+                        field_data = torch.sign(field_data) * (torch.expm1(torch.abs(field_data)))
                     case _:
                         raise ValueError(f"Unsupported remapping method: {method}")
             case {"assign": {"field_name": field_name}}:

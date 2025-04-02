@@ -294,6 +294,10 @@ class SceneEncoder:
                 self.decoding_params.fields[field_name].append({"remapping": {"method": "exp"}})
                 field_data = field_data.log()
 
+            case {"remapping": {"method": "signed-log"}}:
+                self.decoding_params.fields[field_name].append({"remapping": {"method": "signed-exp"}})
+                field_data = torch.sign(field_data) * torch.log1p(torch.abs(field_data))
+
             case {"remapping": {"method": "inverse-sigmoid"}}:
                 self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
                 field_data = torch.log(field_data / (1 - field_data))

@@ -79,6 +79,8 @@ fields:
     - reindex:
         index_field: sorted_indices
     - remapping:
+        method: signed-log
+    - remapping:
         method: minmax
         min: 0.0
         max: 65535.0
