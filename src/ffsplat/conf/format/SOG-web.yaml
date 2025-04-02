@@ -95,6 +95,9 @@ fields:
     - to_dtype:
         dtype: uint16
         round_to_int: true
+    - split_bytes:
+        to_fields_with_prefix: means_bytes_
+        num_bytes: 2
 
   scales:
     - reindex:
@@ -129,7 +132,7 @@ files:
     type: png
   - from_field: scales
     type: png
-  - from_field: means
+  - from_fields_with_prefix: means_bytes_
     type: png
   - from_field: quaternions
     type: png

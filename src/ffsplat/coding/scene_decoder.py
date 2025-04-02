@@ -73,6 +73,27 @@ class SceneDecoder:
 
     def _process_field(self, field_op: dict[str, Any], field_data: Tensor | None) -> Tensor:  # noqa: C901
         match field_op:
+            case {"combine": {"from_field_list": from_list, "method": "bytes"}}:
+                num_bytes = len(from_list)
+
+                if num_bytes < 2 or num_bytes > 8:
+                    raise ValueError("num_bytes must be between 2 and 8")
+
+                byte_tensors: list[Tensor] = [
+                    self.fields[source_field_name]
+                    for source_field_name in from_list
+                    if source_field_name in self.fields
+                ]
+
+                target_dtype = torch.int32 if num_bytes <= 4 else torch.int64
+
+                field_data = byte_tensors[0].to(target_dtype)
+
+                for i, byte_tensor in enumerate(byte_tensors):
+                    if byte_tensor.dtype != torch.uint8:
+                        raise ValueError(f"Source tensor {i} must be of type uint8")
+                    field_data = field_data | (byte_tensor.to(target_dtype) << (i * 8))
+
             case {"combine": {"from_fields_with_prefix": from_prefix, "method": method, "dim": dim}}:
                 prefix_tensors: list[Tensor] = [
                     field_data

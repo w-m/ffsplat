@@ -410,8 +410,40 @@ class SceneEncoder:
                                 f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
                             )
                         field_data = field_data.to(torch.uint16)
+                    case "int32":
+                        if field_data.min() < -2147483648 or field_data.max() > 2147483647:
+                            raise ValueError(
+                                f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                            )
+                        field_data = field_data.to(torch.int32)
                     case _:
                         raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+
+            case {"split_bytes": {"to_fields_with_prefix": to_fields_with_prefix, "num_bytes": num_bytes}}:
+                num_bytes = int(num_bytes)
+
+                if num_bytes < 2 or num_bytes > 8:
+                    raise ValueError("num_bytes must be between 2 and 8")
+
+                if torch.is_floating_point(field_data):
+                    raise ValueError(f"Field data must be an integer data type, got {field_data.dtype}")
+
+                field_data = field_data.to(torch.int32) if num_bytes <= 4 else field_data.to(torch.int64)
+
+                res_field_names = []
+
+                for i in range(num_bytes):
+                    mask = (field_data >> (i * 8)) & 0xFF
+                    res_field_name = f"{to_fields_with_prefix}{i}"
+                    res_field_names.append(res_field_name)
+                    self.fields[res_field_name] = mask.to(torch.uint8)
+
+                self.decoding_params.fields[field_name].append({
+                    "combine": {
+                        "from_field_list": res_field_names,
+                        "method": "bytes",
+                    }
+                })
 
             case _:
                 raise ValueError(f"Unsupported field operation: {field_op}")
