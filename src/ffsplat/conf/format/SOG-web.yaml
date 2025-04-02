@@ -47,6 +47,7 @@ fields:
         dim: 2
     - to_dtype:
         dtype: uint8
+        round_to_int: true
 
   f_rest:
     - permute:
@@ -57,11 +58,12 @@ fields:
         index_field: sorted_indices
     - remapping:
         method: channelwise-minmax
-        min: 0.0
-        max: 255.0
+        min: 0
+        max: 31
         dim: 2
     - to_dtype:
         dtype: uint8
+        round_to_int: true
     - split:
         to_fields_with_prefix: f_rest_
         split_size_or_sections: 3
@@ -73,11 +75,13 @@ fields:
         index_field: sorted_indices
     - remapping:
         method: channelwise-minmax
-        min: 0.0
-        max: 255.0
+        min: 0
+        max: 63
         dim: 2
     - to_dtype:
         dtype: uint8
+        round_to_int: true
+
   means:
     - reindex:
         index_field: sorted_indices
@@ -85,11 +89,12 @@ fields:
         method: signed-log
     - remapping:
         method: channelwise-minmax
-        min: 0.0
-        max: 65535.0
+        min: 0
+        max: 65535
         dim: 2
     - to_dtype:
         dtype: uint16
+        round_to_int: true
 
   scales:
     - reindex:
@@ -98,11 +103,12 @@ fields:
         method: log
     - remapping:
         method: channelwise-minmax
-        min: 0.0
-        max: 255.0
+        min: 0
+        max: 63
         dim: 2
     - to_dtype:
         dtype: uint8
+        round_to_int: true
 
   opacities:
     - reindex:
@@ -111,11 +117,12 @@ fields:
         method: inverse-sigmoid
     - remapping:
         method: channelwise-minmax
-        min: 0.0
-        max: 255.0
+        min: 0
+        max: 63
         dim: 2
     - to_dtype:
         dtype: uint8
+        round_to_int: true
 
 files:
   - from_field: opacities

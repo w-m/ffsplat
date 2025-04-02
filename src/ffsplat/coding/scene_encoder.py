@@ -386,10 +386,13 @@ class SceneEncoder:
                 )
                 field_data = sorted_indices
 
-            case {"to_dtype": {"dtype": dtype_str}}:
+            case {"to_dtype": {"dtype": dtype_str, "round_to_int": round_to_int}}:
                 torch_dtype_to_str = {
                     torch.float32: "float32",
                 }
+
+                if round_to_int:
+                    field_data = torch.round(field_data)
 
                 self.decoding_params.fields[field_name].append({
                     "to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}
