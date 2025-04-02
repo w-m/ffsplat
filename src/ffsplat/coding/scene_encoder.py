@@ -211,7 +211,9 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
         params_tensor = params_tensor[shuffled_indices]
 
     grid_to_sort = as_grid_img(params_tensor).permute(2, 0, 1).to("cuda")
-    _, sorted_indices_ret = sort_with_plas(grid_to_sort, improvement_break=plas_cfg.improvement_break, verbose=True)
+    _, sorted_indices_ret = sort_with_plas(
+        grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=True
+    )
 
     sorted_indices: Tensor = sorted_indices_ret.squeeze(0).to(params_tensor.device)
 
