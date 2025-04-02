@@ -41,9 +41,10 @@ fields:
     - reindex:
         index_field: sorted_indices
     - remapping:
-        method: minmax
+        method: channelwise-minmax
         min: 0.0
         max: 255.0
+        dim: 2
     - to_dtype:
         dtype: uint8
 
@@ -55,9 +56,10 @@ fields:
     - reindex:
         index_field: sorted_indices
     - remapping:
-        method: minmax
+        method: channelwise-minmax
         min: 0.0
         max: 255.0
+        dim: 2
     - to_dtype:
         dtype: uint8
     - split:
@@ -70,9 +72,10 @@ fields:
     - reindex:
         index_field: sorted_indices
     - remapping:
-        method: minmax
+        method: channelwise-minmax
         min: 0.0
         max: 255.0
+        dim: 2
     - to_dtype:
         dtype: uint8
   means:
@@ -81,9 +84,10 @@ fields:
     - remapping:
         method: signed-log
     - remapping:
-        method: minmax
+        method: channelwise-minmax
         min: 0.0
         max: 65535.0
+        dim: 2
     - to_dtype:
         dtype: uint16
 
@@ -93,9 +97,10 @@ fields:
     - remapping:
         method: log
     - remapping:
-        method: minmax
+        method: channelwise-minmax
         min: 0.0
         max: 255.0
+        dim: 2
     - to_dtype:
         dtype: uint8
 
@@ -105,9 +110,10 @@ fields:
     - remapping:
         method: inverse-sigmoid
     - remapping:
-        method: minmax
+        method: channelwise-minmax
         min: 0.0
         max: 255.0
+        dim: 2
     - to_dtype:
         dtype: uint8
 

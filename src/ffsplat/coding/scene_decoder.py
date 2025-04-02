@@ -126,6 +126,33 @@ class SceneDecoder:
                 field_data_norm = minmax(field_data)
                 field_data = (field_data_norm * (max_val - min_val)) + min_val
 
+            case {
+                "remapping": {
+                    "method": "channelwise-minmax",
+                    "min_values": min_values,
+                    "max_values": max_values,
+                    "dim": dim,
+                }
+            }:
+                if field_data is None:
+                    raise ValueError("Field data is None before channelwise remapping")
+
+                min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
+                max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
+
+                # create a shape that's 1 everywhere but in dim, where it has the size of min_values
+                # e.g. [1, 1, 3] for dim=2 with 3 min_values
+                view_shape = [1 if d != dim else -1 for d in range(field_data.dim())]
+
+                min_tensor = min_tensor.view(view_shape)
+                max_tensor = max_tensor.view(view_shape)
+
+                field_range = max_tensor - min_tensor
+                field_range[field_range == 0] = 1.0
+
+                field_data = minmax(field_data)
+                field_data = field_data * field_range + min_tensor
+
             case {"remapping": {"method": method}}:
                 if field_data is None:
                     raise ValueError("Field data is None before remapping")

@@ -320,6 +320,30 @@ class SceneEncoder:
                 field_data = minmax(field_data)
                 field_data = field_data * (max_val_f - min_val_f) + min_val_f
 
+            case {"remapping": {"method": "channelwise-minmax", "min": min_val, "max": max_val, "dim": dim}}:
+                min_val_f = float(min_val)
+                max_val_f = float(max_val)
+
+                min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+                max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+
+                self.decoding_params.fields[field_name].append({
+                    "remapping": {
+                        "method": "channelwise-minmax",
+                        "min_values": min_vals.tolist(),
+                        "max_values": max_vals.tolist(),
+                        "dim": dim,
+                    }
+                })
+
+                field_range = max_vals - min_vals
+                field_range[field_range == 0] = 1.0
+
+                normalized = (field_data - min_vals) / field_range
+                normalized = normalized * (max_val_f - min_val_f) + min_val_f
+
+                field_data = normalized
+
             case {"reindex": {"index_field": index_field_name}}:
                 index_field = self.fields[index_field_name]
                 if len(index_field.shape) != 2:
