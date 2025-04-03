@@ -152,9 +152,10 @@ class Renderer(threading.Thread):
             except Exception:
                 traceback.print_exc()
                 os._exit(1)
+
             self.client.scene.set_background_image(
                 img,
-                format="jpeg",
+                format=self.viewer.render_quality_dropdown.value,
                 jpeg_quality=70 if task.action in ["static", "update"] else 40,
                 depth=depth,
             )

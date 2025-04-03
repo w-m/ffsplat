@@ -133,6 +133,10 @@ class Viewer:
                 "Max Img Res", min=64, max=2048, step=1, initial_value=2048
             )
             self._max_img_res_slider.on_update(self.rerender)
+            self.render_quality_dropdown = self.server.gui.add_dropdown(
+                "Render Format:", ["png", "jpeg"], initial_value="jpeg"
+            )
+            self.render_quality_dropdown.on_update(self.rerender)
         self.tab_group = self.server.gui.add_tab_group()
         self.scenes_folder = self.tab_group.add_tab("Scenes")
 
