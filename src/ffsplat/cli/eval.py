@@ -95,6 +95,8 @@ def eval_step(
     canvas = (canvas * 255).astype(np.uint8)
 
     if results_path is not None:
+        if not os.path.exists(results_path):
+            os.makedirs(results_path)
         Image.fromarray(canvas).save(results_path / f"eval_{step:04d}.png")
 
     pixels_p = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
