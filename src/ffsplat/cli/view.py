@@ -17,7 +17,7 @@ from torch import Tensor
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from ffsplat.cli.eval import eval_step
+from ffsplat.cli.eval import eval_step, get_directory_size
 from ffsplat.coding.scene_decoder import decode_gaussians
 from ffsplat.coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
 from ffsplat.datasets.blenderparser import BlenderParser
@@ -45,6 +45,7 @@ def get_table_row(scene, scene_metrics: dict[str, float | int]) -> str:
     table_row += f"<td>{scene_metrics['psnr']:.3f}</td>"
     table_row += f"<td>{scene_metrics['ssim']:.4f}</td>"
     table_row += f"<td>{scene_metrics['lpips']:.3f}</td>"
+    table_row += f"<td>{scene_metrics['size'] / 1024 / 1024:.3f}</td>"
     table_row += f"<td>{scene_metrics['num_GS']}</td>"
     table_row += "</tr>"
     return table_row
@@ -93,6 +94,7 @@ class InteractiveConversionTool:
         <th>PSNR</th>
         <th>SSIM</th>
         <th>LPIPS</th>
+        <th>Size (MB)</th>
         <th>Number of GS</th>
       </tr>
     </thead>
@@ -305,10 +307,13 @@ class InteractiveConversionTool:
 
         elapsed_time /= len(valloader)
 
+        size = get_directory_size(self.scenes[scene_id].data_path)
+
         stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
         stats.update({
             "elapsed_time": elapsed_time,
             "num_GS": len(self.gaussians.means),
+            "size": size,
         })
         self.scenes[scene_id].scene_metrics = stats
 

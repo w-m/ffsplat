@@ -14,11 +14,11 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from tqdm import tqdm
 
-from ..coding.scene_decoder import decode_gaussians
-from ..datasets.blenderparser import BlenderParser
-from ..datasets.colmapparser import ColmapParser
-from ..datasets.dataset import Dataset
-from ..models.gaussians import Gaussians
+from ffsplat.coding.scene_decoder import decode_gaussians
+from ffsplat.datasets.blenderparser import BlenderParser
+from ffsplat.datasets.colmapparser import ColmapParser
+from ffsplat.datasets.dataset import Dataset
+from ffsplat.models.gaussians import Gaussians
 
 
 @torch.no_grad()
@@ -107,7 +107,19 @@ def eval_step(
     return elapsed_time
 
 
-def evaluation(gaussians: Gaussians, valset: Dataset, results_path: Path) -> None:
+def get_directory_size(path: Path) -> int:
+    """Get the size of a directory."""
+    total_size = 0
+    if path.is_file():
+        return os.path.getsize(path)
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            total_size += os.path.getsize(fp)
+    return total_size
+
+
+def evaluation(gaussians: Gaussians, valset: Dataset, data_path: Path, results_path: Path) -> None:
     """Entry for evaluation."""
     print("Running evaluation...")
     device = "cuda"
@@ -126,15 +138,19 @@ def evaluation(gaussians: Gaussians, valset: Dataset, results_path: Path) -> Non
 
     elapsed_time /= len(valloader)
 
+    size = get_directory_size(data_path)
+
     stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
     stats.update({
         "elapsed_time": elapsed_time,
         "num_GS": len(gaussians.means),
+        "size": size,
     })
     print(
         f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
         f"Time: {stats['elapsed_time']:.3f}s/image "
-        f"Number of GS: {stats['num_GS']}"
+        f"Number of GS: {stats['num_GS']} "
+        f"Size: {stats['size'] / 1024 / 1024:.3f}MB "
     )
 
 
@@ -146,7 +162,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    gaussians = decode_gaussians(args.data_path, "3DGS-INRIA.ply").to("cuda")
+    gaussians = decode_gaussians(args.data_path, "smurfx").to("cuda")
 
     dataset_dir = args.dataset_path
 
@@ -162,4 +178,4 @@ if __name__ == "__main__":
 
     dataset = Dataset(dataparser)
 
-    evaluation(gaussians, dataset, args.results_path)
+    evaluation(gaussians, dataset, args.data_path, args.results_path)
