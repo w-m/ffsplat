@@ -142,8 +142,8 @@ class Viewer:
 
     def add_eval(self, eval_fn: Callable):
         with self.tab_group.add_tab("Evaluation") as self.eval_folder:
-            self._eval_button = self.server.gui.add_button("Run evaluation")
-            self._eval_button.on_click(eval_fn)
+            self.eval_button = self.server.gui.add_button("Run evaluation")
+            self.eval_button.on_click(eval_fn)
             self.eval_info = self.server.gui.add_markdown("")
             self.eval_info.visible = False
             self.eval_progress = self.server.gui.add_progress_bar(0.0)
@@ -158,11 +158,13 @@ class Viewer:
             self._convert_button.on_click(convert_fn)
         build_convert_options_fn(None)
 
-    def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable):
+    def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable):
         with self.scenes_folder, self.server.gui.add_folder(f"Scene {scene_id}"):
             self.server.gui.add_markdown(description)
             load_button = self.server.gui.add_button("Load")
             load_button.on_click(lambda _: load_fn(scene_id))
+            save_button = self.server.gui.add_button("Save")
+            save_button.on_click(lambda _: save_fn(scene_id))
             self.load_buttons.append(load_button)
 
     def add_test_functionality(self, test_fn: Callable):

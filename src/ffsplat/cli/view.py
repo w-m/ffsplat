@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
@@ -26,7 +28,9 @@ from ffsplat.render.viewer import CameraState, Viewer
 # TODO: this is a duplicate with the viewer
 encoding_formats: list[str] = ["3DGS_INRIA_ply", "SOG-web"]  # available formats
 
-operations: dict[str, list[str]] = {"remapping": ["inverse-sigmoid", "log"]}  # methods for each operation
+operations: dict[str, list[str]] = {
+    "remapping": ["inverse-sigmoid", "log", "channelwise-minmax", "signed-log"]
+}  # methods for each operation
 
 
 def create_update_field(dict_to_update: dict[str, Any], key: str):
@@ -50,7 +54,7 @@ def get_table_row(scene, scene_metrics: dict[str, float | int]) -> str:
 class SceneData:
     id: int
     description: str
-    input_path: Path
+    data_path: Path
     input_format: str
     scene_metrics: dict[str, float | int] = None
     # encoding_params: EncodingParams | None
@@ -100,12 +104,12 @@ class InteractiveConversionTool:
 </div>
 """
     table_rows = ""
+    temp_dir = tempfile.TemporaryDirectory()
     encoding_params: EncodingParams | None = None
 
     def __init__(self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path):
         self.scenes: list[SceneData] = []
         self.dataset: Path = dataset_path
-        self.write_images: bool = results_path is not None
         self.results_path: Path = results_path
         self.current_scene = 0
 
@@ -137,7 +141,7 @@ class InteractiveConversionTool:
     def convert(self, _):
         # we shouldn't redo the encoding completely every time, as resorting takes a lot of time
         encoding_params = self.encoding_params
-        output_path = Path(f"./temp/gaussians{len(self.scenes)}")
+        output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
 
         # TODO: use tempfile
         encoder = SceneEncoder(
@@ -163,11 +167,11 @@ class InteractiveConversionTool:
 
     # TODO: add a button to save the scene in an output directory?
     # should we be able to remove scenes again? scenes are removed on program termination
-    def _add_scene(self, description, input_path, input_format):
+    def _add_scene(self, description, data_path, input_format):
         self.scenes.append(
-            SceneData(id=len(self.scenes), description=description, input_path=input_path, input_format=input_format)
+            SceneData(id=len(self.scenes), description=description, data_path=data_path, input_format=input_format)
         )
-        self.viewer.add_to_scene_tab(len(self.scenes) - 1, description, self._load_scene)
+        self.viewer.add_to_scene_tab(len(self.scenes) - 1, description, self._load_scene, self._save_scene)
         self._load_scene(len(self.scenes) - 1)
 
     def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
@@ -181,11 +185,20 @@ class InteractiveConversionTool:
                         description += f"  {operation}: {field_operation[operation]['method']}  \n"
         return description
 
+    def _save_scene(self, scene_id):
+        print(f"Saving scene {scene_id}...")
+        if self.results_path is None:
+            print("No results path specified. Cannot save scene.")
+            return
+        scene_path = self.results_path / Path(f"scene_{scene_id}/data")
+        if not os.path.exists(scene_path):
+            os.makedirs(scene_path)
+        shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
+
     def _load_scene(self, scene_id):
-        print("Loading scene...")
+        print(f"Loading scene {scene_id}...")
 
         # update the load buttons
-        print(scene_id)
         self.viewer.load_buttons[self.current_scene].disabled = False
         self.current_scene = scene_id
         self.viewer.load_buttons[self.current_scene].disabled = True
@@ -194,12 +207,13 @@ class InteractiveConversionTool:
 
         # load scene
         scene = self.scenes[scene_id]
-        self.gaussians = decode_gaussians(scene.input_path, input_format=scene.input_format).to("cuda")
+        self.gaussians = decode_gaussians(scene.data_path, input_format=scene.input_format).to("cuda")
         self.deactivate_convert_preview()
 
         self.viewer.rerender(None)
 
     def full_evaluation(self, _):
+        self.viewer.eval_button.disabled = True
         self.table_rows = ""
         for scene in self.scenes:
             if scene.scene_metrics is None:
@@ -213,6 +227,7 @@ class InteractiveConversionTool:
             self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
         self.viewer.eval_info.visible = False
         self.viewer.eval_progress.visible = False
+        self.viewer.eval_button.disabled = False
 
     def deactivate_convert_preview(
         self,
@@ -269,11 +284,15 @@ class InteractiveConversionTool:
         elapsed_time = 0
         metrics = defaultdict(list)
 
+        imgs_path: Path | None = None
+        if self.results_path is not None:
+            imgs_path = self.results_path / Path(f"scene_{scene_id}/imgs")
+
         for i, data in enumerate(valloader):
             elapsed_time += eval_step(
                 self.gaussians,
                 self.dataset.white_background,
-                self.results_path,
+                imgs_path,
                 device,
                 i,
                 metrics,
@@ -355,7 +374,6 @@ def main(parser: ArgumentParser):
     )
 
     print("Viewer running... Ctrl+C to exit.")
-    # TODO: clean up temp folder on keyboard interrupt
     time.sleep(100000)
 
 
