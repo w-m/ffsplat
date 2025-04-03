@@ -137,13 +137,37 @@ fields:
 files:
   - from_field: opacities
     type: avif
+    coding_params:
+      quality: -1
+      chroma: 0
+      matrix_coefficients: 0
   - from_field: scales
     type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 0
   - from_fields_with_prefix: means_bytes_
     type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 0
   - from_field: quaternions
     type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 0
   - from_field: f_dc
     type: avif
+    coding_params:
+      quality: 100
+      chroma: 420
+      matrix_coefficients: 1
   - from_fields_with_prefix: f_rest_
     type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 1

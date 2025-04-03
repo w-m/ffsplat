@@ -237,13 +237,17 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
     return sorted_indices
 
 
-def write_image(output_file_path: Path, field_data: Tensor, file_type: str) -> None:
+def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
     match file_type:
         case "png":
             cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
         case "avif":
             Image.fromarray(field_data.cpu().numpy()).save(
-                output_file_path, format="AVIF", quality=-1, chroma=444, matrix_coefficients=0
+                output_file_path,
+                format="AVIF",
+                quality=coding_params.get("quality", -1),
+                chroma=coding_params.get("chroma", 444),
+                matrix_coefficients=coding_params.get("matrix_coefficients", 0),
             )
         case _:
             raise ValueError(f"Unsupported file type: {file_type}")
@@ -487,7 +491,7 @@ class SceneEncoder:
                     output_file_path = self.output_path / file_path
 
                     encode_ply(fields=fields_to_write, path=output_file_path)
-                case {"from_field": field_name, "type": file_type}:
+                case {"from_field": field_name, "type": file_type, "coding_params": coding_params}:
                     field_data = self.fields[field_name]
                     file_path = f"{field_name}.{file_type}"
                     output_file_path = self.output_path / file_path
@@ -498,17 +502,28 @@ class SceneEncoder:
                         "field_name": field_name,
                     })
 
-                    write_image(output_file_path, field_data, file_type)
+                    write_image(
+                        output_file_path,
+                        field_data,
+                        file_type,
+                        coding_params if isinstance(coding_params, dict) else {},
+                    )
 
                 case {
                     "from_fields_with_prefix": field_prefix,
                     "type": file_type,
+                    "coding_params": coding_params,
                 }:
                     for field_name, field_data in self.fields.items():
                         if field_name.startswith(field_prefix):
                             file_path = f"{field_name}.{file_type}"
                             output_file_path = self.output_path / file_path
-                            write_image(output_file_path, field_data, file_type)
+                            write_image(
+                                output_file_path,
+                                field_data,
+                                file_type,
+                                coding_params if isinstance(coding_params, dict) else {},
+                            )
 
                             self.decoding_params.files.append({
                                 "file_path": file_path,
