@@ -24,6 +24,10 @@ class BlenderParser(DataParser):
         data_dir: str,
         normalize_data: bool = False,
     ) -> None:
+        print(
+            """Warning: The DataParser uses Camorph to load the data. Camorph corrects the rotational part of the camera to world matrices. This might have an influence on the results.
+            Camorph prints a warning if the sum of the differences between the original rotation and the corrected rotation is larger than 1e-5. If you don't see this warning, their still might be a correction."""
+        )
         self.data_dir: str = data_dir
         self.normalize_data: bool = normalize_data
         self.datatype: str = "blender"
