@@ -78,36 +78,21 @@ fields:
         dims: [0, 2, 1]
     - flatten:
         start_dim: 1
-    - cluster:
-        method: kmeans
-        num_clusters: 4096
-        distance: euclidean
-        to_fields_with_prefix: f_rest_
-
-  f_rest_labels:
     - reindex:
         index_field: sorted_indices
     - remapping:
         method: channelwise-minmax
         min: 0
-        max: 65535
-        dim: 2
-    - to_dtype:
-        dtype: uint16
-        round_to_int: true
-    - split_bytes:
-        to_fields_with_prefix: f_rest_labels_bytes_
-        num_bytes: 2
-
-  f_rest_centroids:
-    - remapping:
-        method: channelwise-minmax
-        min: 0.0
-        max: 255.0
+        max: 31
         dim: 2
     - to_dtype:
         dtype: uint8
         round_to_int: true
+    - split:
+        to_fields_with_prefix: f_rest_
+        split_size_or_sections: 3
+        dim: 2
+        squeeze: true
 
   quaternions:
     - reindex:
@@ -180,21 +165,9 @@ files:
       quality: 100
       chroma: 420
       matrix_coefficients: 1
-  - from_field: f_rest_labels_bytes_0
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 0
-      matrix_coefficients: 0
-  - from_field: f_rest_labels_bytes_1
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 0
-      matrix_coefficients: 0
-  - from_field: f_rest_centroids
+  - from_fields_with_prefix: f_rest_
     type: avif
     coding_params:
       quality: -1
       chroma: 444
-      matrix_coefficients: 0
+      matrix_coefficients: 1

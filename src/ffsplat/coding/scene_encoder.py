@@ -12,6 +12,7 @@ from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
+from torchpq.clustering import KMeans  # type: ignore[import-untyped]
 
 from ..io.ply import encode_ply
 from ..models.gaussians import Gaussians
@@ -275,6 +276,26 @@ class SceneEncoder:
 
     def _process_field(self, field_name: str, field_op: dict[str, Any], field_data: Tensor) -> Tensor:  # noqa: C901
         match field_op:
+            case {
+                "cluster": {
+                    "method": "kmeans",
+                    "num_clusters": num_clusters,
+                    "distance": distance,
+                    "to_fields_with_prefix": to_fields_with_prefix,
+                }
+            }:
+                kmeans = KMeans(n_clusters=num_clusters, distance=distance, verbose=True)
+                labels = kmeans.fit(field_data.permute(1, 0).contiguous())
+                centroids = kmeans.centroids.permute(1, 0)
+                self.fields[f"{to_fields_with_prefix}labels"] = labels
+                self.fields[f"{to_fields_with_prefix}centroids"] = centroids
+                self.decoding_params.fields[field_name].append({
+                    "lookup": {
+                        "from_field": f"{to_fields_with_prefix}labels",
+                        "to_field": f"{to_fields_with_prefix}centroids",
+                    }
+                })
+
             case {"flatten": {"start_dim": start_dim}}:
                 target_shape = field_data.shape[start_dim:]
                 self.decoding_params.fields[field_name].append({
@@ -559,6 +580,8 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_ply.yaml"))
         case "SOG-web":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web.yaml"))
+        case "SOG-web-sh-split":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-sh-split.yaml"))
         case _:
             raise ValueError(f"Unsupported output format: {output_format}")
 

@@ -143,6 +143,10 @@ class SceneDecoder:
                 else:
                     raise ValueError(f"Field not found: {name}")
 
+            case {"lookup": {"from_field": from_field, "to_field": to_field}}:
+                values = self.fields[to_field][self.fields[from_field].to(torch.int32)]
+                field_data = values
+
             case {"reshape_from_dim": {"start_dim": start_dim, "shape": shape}}:
                 if field_data is None:
                     raise ValueError("Field data is None before reshape")
