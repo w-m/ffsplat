@@ -279,6 +279,13 @@ def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
             ).with_input_path(input_path)
         else:
             raise ValueError("Input file must be a .ply file for 3DGS-INRIA format")
+    elif input_format == "3DGS-INRIA-nosh.ply":
+        if input_file_extension == ".ply":
+            decoding_params = DecodingParams.from_yaml_file(
+                Path("3DGS_INRIA_ply_nosh_decoding_template.yaml")
+            ).with_input_path(input_path)
+        else:
+            raise ValueError("Input file must be a .ply file for 3DGS-INRIA format")
     elif input_format == "smurfx":
         if not input_path.is_dir():
             raise ValueError("Input path must be a directory for smurfx format")
