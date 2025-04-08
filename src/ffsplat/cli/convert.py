@@ -26,12 +26,15 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, required=True, help="Output file or directory path")
     parser.add_argument("--output-format", type=str, required=True, help="Output format")
+    parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for processing (default: cuda:0)")
 
     cfg = parser.parse_args()
 
     if not cfg.input.exists():
         print(f"Error: Input path not found: {cfg.input}", file=sys.stderr)
         sys.exit(1)
+
+    print(f"Using device: {cfg.device}")
 
     try:
         cfg.output.parent.mkdir(parents=True, exist_ok=True)
@@ -43,6 +46,7 @@ def main() -> None:
         sys.exit(1)
 
     gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format)
+    gaussians = gaussians.to(cfg.device)
 
     encode_gaussians(gaussians=gaussians, output_path=cfg.output, output_format=cfg.output_format)
 

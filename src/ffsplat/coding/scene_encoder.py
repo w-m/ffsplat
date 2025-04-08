@@ -220,7 +220,7 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
         shuffled_indices = torch.randperm(params_tensor.shape[0], device=params_tensor.device)
         params_tensor = params_tensor[shuffled_indices]
 
-    grid_to_sort = as_grid_img(params_tensor).permute(2, 0, 1).to("cuda")
+    grid_to_sort = as_grid_img(params_tensor).permute(2, 0, 1)
     _, sorted_indices_ret = sort_with_plas(
         grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=True
     )
