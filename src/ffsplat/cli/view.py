@@ -75,10 +75,11 @@ if __name__ == "__main__":
         required=True,
         help="Input format",
     )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
     cfg = parser.parse_args()
 
-    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format).to("cuda")
+    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format, verbose=cfg.verbose).to("cuda")
 
     server = viser.ViserServer(verbose=False)
     viewer = Viewer(server=server, render_fn=bound_render_fn, mode="rendering")

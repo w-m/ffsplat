@@ -263,13 +263,25 @@ class SceneDecoder:
             case _:
                 raise ValueError("Unsupported scene format")
 
-    def decode(self) -> None:
+    def _print_field_stats(self) -> None:
+        print("Decoded field statistics:")
+        for field_name, field_data in sorted(self.fields.items()):
+            stats = f"{field_name}: \t{tuple(field_data.shape)} | {field_data.dtype}"
+            if field_data.numel() > 0:
+                stats += f" | Min: {field_data.min().item():.4f} | Max: {field_data.max().item():.4f}"
+                stats += f" | Median: {field_data.median().item():.4f}"
+                # stats += f" | Unique Count: {field_data.unique().numel()}"
+            print(stats)
+
+    def decode(self, verbose: bool) -> None:
         self._decode_files()
         self._process_fields()
+        if verbose:
+            self._print_field_stats()
         self._create_scene()
 
 
-def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
+def decode_gaussians(input_path: Path, input_format: str, verbose: bool) -> Gaussians:
     input_file_extension = input_path.suffix
 
     if input_format == "3DGS-INRIA.ply":
@@ -294,7 +306,7 @@ def decode_gaussians(input_path: Path, input_format: str) -> Gaussians:
         raise ValueError(f"Unsupported input format: {input_format}")
 
     decoder = SceneDecoder(decoding_params)
-    decoder.decode()
+    decoder.decode(verbose=verbose)
     gaussians = decoder.scene
 
     return gaussians

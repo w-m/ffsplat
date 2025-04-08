@@ -27,6 +27,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True, help="Output file or directory path")
     parser.add_argument("--output-format", type=str, required=True, help="Output format")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for processing (default: cuda:0)")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output",
+    )
 
     cfg = parser.parse_args()
 
@@ -34,7 +39,8 @@ def main() -> None:
         print(f"Error: Input path not found: {cfg.input}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Using device: {cfg.device}")
+    if cfg.verbose:
+        print(f"Using device: {cfg.device}")
 
     try:
         cfg.output.parent.mkdir(parents=True, exist_ok=True)
@@ -45,10 +51,10 @@ def main() -> None:
         print(f"Error creating output directory: {e}", file=sys.stderr)
         sys.exit(1)
 
-    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format)
+    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format, verbose=cfg.verbose)
     gaussians = gaussians.to(cfg.device)
 
-    encode_gaussians(gaussians=gaussians, output_path=cfg.output, output_format=cfg.output_format)
+    encode_gaussians(gaussians=gaussians, output_path=cfg.output, output_format=cfg.output_format, verbose=cfg.verbose)
 
     print(f"Successfully converted {cfg.input} to {cfg.output}")
 

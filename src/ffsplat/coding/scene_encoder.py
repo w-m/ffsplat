@@ -153,7 +153,7 @@ def minmax(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def primitive_filter_pruning_to_square_shape(data: Tensor, verbose: bool = False) -> Tensor | None:
+def primitive_filter_pruning_to_square_shape(data: Tensor, verbose: bool) -> Tensor | None:
     """Returning None indicates that no primitives need to be pruned"""
     num_primitives = data.shape[0]
 
@@ -184,8 +184,8 @@ def as_grid_img(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
-    primitive_filter = primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by])
+def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor], verbose: bool) -> Tensor:
+    primitive_filter = primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by], verbose)
 
     # TODO untested
     match plas_cfg.scaling_fn:
@@ -222,7 +222,7 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor]) -> Tensor:
 
     grid_to_sort = as_grid_img(params_tensor).permute(2, 0, 1)
     _, sorted_indices_ret = sort_with_plas(
-        grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=True
+        grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=verbose
     )
 
     sorted_indices: Tensor = sorted_indices_ret.squeeze(0).to(params_tensor.device)
@@ -262,7 +262,18 @@ class SceneEncoder:
 
     fields: dict[str, Tensor] = field(default_factory=dict)
 
-    def _encode_fields(self) -> None:
+    def _print_field_stats(self) -> None:
+        # TODO duplicated code from scene_decoder
+        print("Encoded field statistics:")
+        for field_name, field_data in sorted(self.fields.items()):
+            stats = f"{field_name}: \t{tuple(field_data.shape)} | {field_data.dtype}"
+            if field_data.numel() > 0:
+                stats += f" | Min: {field_data.min().item():.4f} | Max: {field_data.max().item():.4f}"
+                stats += f" | Median: {field_data.median().item():.4f}"
+                # stats += f" | Unique Count: {field_data.unique().numel()}"
+            print(stats)
+
+    def _encode_fields(self, verbose: bool) -> None:
         # go through the fields of encoding params
         for field_name, field_config in self.encoding_params.fields.items():
             field_data = self.fields.get(field_name)
@@ -271,10 +282,10 @@ class SceneEncoder:
                 if isinstance(field_op, dict):
                     if field_data is None:
                         raise ValueError(f"Field '{field_name}' not found in input fields.")
-                    field_data = self._process_field(field_name, field_op, field_data)
+                    field_data = self._process_field(field_name, field_op, field_data, verbose=verbose)
                     self.fields[field_name] = field_data
 
-    def _process_field(self, field_name: str, field_op: dict[str, Any], field_data: Tensor) -> Tensor:  # noqa: C901
+    def _process_field(self, field_name: str, field_op: dict[str, Any], field_data: Tensor, verbose: bool) -> Tensor:  # noqa: C901
         match field_op:
             case {
                 "cluster": {
@@ -430,6 +441,7 @@ class SceneEncoder:
                 sorted_indices = plas_preprocess(
                     plas_cfg=PLASConfig(**plas_cfg_dict),
                     fields=self.fields,
+                    verbose=verbose,
                 )
                 field_data = sorted_indices
 
@@ -559,7 +571,7 @@ class SceneEncoder:
                 case _:
                     raise ValueError(f"Unsupported file format: {file}")
 
-    def encode(self) -> None:
+    def encode(self, verbose: bool) -> None:
         # container as folder for now
         self.output_path.mkdir(parents=True, exist_ok=True)
 
@@ -567,7 +579,11 @@ class SceneEncoder:
         # TODO review design
         self.fields["_"] = torch.empty(0)
 
-        self._encode_fields()
+        self._encode_fields(verbose=verbose)
+
+        if verbose:
+            self._print_field_stats()
+
         self._write_files()
 
         # revert the order of the fields in self.decoding_params to enable straightforward decoding
@@ -578,7 +594,7 @@ class SceneEncoder:
             yaml.dump(self.decoding_params, f, Dumper=SerializableDumper, default_flow_style=False, sort_keys=False)
 
 
-def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str) -> None:
+def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str, verbose: bool) -> None:
     match output_format:
         case "3DGS-INRIA.ply":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_ply.yaml"))
@@ -602,4 +618,4 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
             scene=encoding_params.scene,
         ),
     )
-    encoder.encode()
+    encoder.encode(verbose=verbose)
