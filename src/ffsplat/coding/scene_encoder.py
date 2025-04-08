@@ -358,6 +358,10 @@ class SceneEncoder:
 
             case {"remapping": {"method": "inverse-sigmoid"}}:
                 self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
+                # ensure that we can encode opacity values in the full range [0, 1]
+                # by clamping the values to (eps, 1 - eps) -> no infinite values from 0.0, 1.0
+                eps = 1e-6
+                field_data = field_data.clamp(eps, 1 - eps)
                 field_data = torch.log(field_data / (1 - field_data))
 
             case {"remapping": {"method": "minmax", "min": min_val, "max": max_val}}:
