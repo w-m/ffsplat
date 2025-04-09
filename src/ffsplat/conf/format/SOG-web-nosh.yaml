@@ -1,0 +1,145 @@
+profile: SOG-web
+profile_version: 0.1
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+fields:
+  means:
+    - remapping:
+        method: signed-log
+    - remapping:
+        method: channelwise-minmax
+        min: 0
+        max: 65535
+        dim: 2
+    - to_dtype:
+        dtype: uint16
+        round_to_int: true
+    - split_bytes:
+        to_fields_with_prefix: means_bytes_
+        num_bytes: 2
+
+  sh:
+    - split:
+        to_field_list: [f_dc]
+        split_size_or_sections: [1]
+        dim: 1
+        squeeze: false
+
+  _:
+    - plas:
+        prune_by: opacities
+        scaling_fn: standardize
+        # activated: true
+        shuffle: true
+        improvement_break: 1e-4
+        # improvement_break: 0.1
+        weights:
+          means_bytes_0: 0.1
+          means_bytes_1: 1.0
+          f_dc: 1.0
+          opacities: 0.0
+          scales: 1.0
+          quaternions: 0.0
+    - to_tmp_field: sorted_indices
+
+  means_bytes_0:
+    - reindex:
+        index_field: sorted_indices
+
+  means_bytes_1:
+    - reindex:
+        index_field: sorted_indices
+
+  f_dc:
+    - flatten:
+        start_dim: 1
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: channelwise-minmax
+        min: 0.0
+        max: 255.0
+        dim: 2
+    - to_dtype:
+        dtype: uint8
+        round_to_int: true
+
+  quaternions:
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: channelwise-minmax
+        min: 0
+        max: 63
+        dim: 2
+    - to_dtype:
+        dtype: uint8
+        round_to_int: true
+
+  scales:
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: log
+    - remapping:
+        method: channelwise-minmax
+        min: 0
+        max: 63
+        dim: 2
+    - to_dtype:
+        dtype: uint8
+        round_to_int: true
+
+  opacities:
+    - reindex:
+        index_field: sorted_indices
+    - remapping:
+        method: inverse-sigmoid
+    - remapping:
+        method: channelwise-minmax
+        min: 0
+        max: 63
+        dim: 2
+    - to_dtype:
+        dtype: uint8
+        round_to_int: true
+
+files:
+  - from_field: opacities
+    type: avif
+    coding_params:
+      quality: -1
+      chroma: 0
+      matrix_coefficients: 0
+  - from_field: scales
+    type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 0
+  - from_fields_with_prefix: means_bytes_
+    type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 0
+  - from_field: quaternions
+    type: avif
+    coding_params:
+      quality: -1
+      chroma: 444
+      matrix_coefficients: 0
+  - from_field: f_dc
+    type: avif
+    coding_params:
+      quality: 100
+      chroma: 420
+      matrix_coefficients: 1
