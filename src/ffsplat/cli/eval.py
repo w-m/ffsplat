@@ -14,11 +14,11 @@ from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMe
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from tqdm import tqdm
 
-from ffsplat.coding.scene_decoder import decode_gaussians
-from ffsplat.datasets.blenderparser import BlenderParser
-from ffsplat.datasets.colmapparser import ColmapParser
-from ffsplat.datasets.dataset import Dataset
-from ffsplat.models.gaussians import Gaussians
+from ..coding.scene_decoder import decode_gaussians
+from ..datasets.blenderparser import BlenderParser
+from ..datasets.colmapparser import ColmapParser
+from ..datasets.dataset import Dataset
+from ..models.gaussians import Gaussians
 
 
 @torch.no_grad()
