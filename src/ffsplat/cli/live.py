@@ -109,13 +109,16 @@ class InteractiveConversionTool:
     temp_dir = tempfile.TemporaryDirectory()
     encoding_params: EncodingParams | None = None
 
-    def __init__(self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path):
+    def __init__(
+        self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path, verbose: bool = False
+    ):
         self.scenes: list[SceneData] = []
         self.dataset: Path = dataset_path
         self.results_path: Path = results_path
         self.current_scene = 0
+        self.verbose = verbose
 
-        self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format)
+        self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
         self.gaussians = self.input_gaussians.to("cuda")
 
         self.server = viser.ViserServer(verbose=False)
@@ -161,7 +164,7 @@ class InteractiveConversionTool:
         )
         # encode writes yaml to output_path but ply to working directory
         # also container meta does not contain the files and the scene data
-        encoder.encode()
+        encoder.encode(verbose=self.verbose)
 
         # add scene to scene list and load it to view the scene
         output_format = self.viewer._output_dropdown.value
@@ -209,7 +212,9 @@ class InteractiveConversionTool:
 
         # load scene
         scene = self.scenes[scene_id]
-        self.gaussians = decode_gaussians(scene.data_path, input_format=scene.input_format).to("cuda")
+        self.gaussians = decode_gaussians(scene.data_path, input_format=scene.input_format, verbose=self.verbose).to(
+            "cuda"
+        )
         self.deactivate_convert_preview()
 
         self.viewer.rerender(None)
@@ -376,6 +381,7 @@ def main(parser: ArgumentParser):
         input_format=cfg.input_format,
         dataset_path=cfg.dataset_path,
         results_path=cfg.results_path,
+        verbose=cfg.verbose,
     )
 
     print("Viewer running... Ctrl+C to exit.")
@@ -395,5 +401,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--dataset-path", type=Path, required=False, help="Path to dataset for evaluation")
     parser.add_argument("--results-path", type=Path, required=False, help="Path to save images from evaluation")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
     main(parser)
