@@ -28,6 +28,7 @@ class Field:
         return self.to_json() == value.to_json() if isinstance(value, Field) else False
 
     def to(self, device: str | torch.device) -> "Field":
+        # TODO: this should keep the operations
         return Field(self.data.to(device))
 
     def to_json(self) -> list[dict[str, Any]]:

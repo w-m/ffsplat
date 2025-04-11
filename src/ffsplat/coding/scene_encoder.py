@@ -2,6 +2,7 @@ import math
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, is_dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -12,13 +13,12 @@ from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
-from torchpq.clustering import KMeans
-
-from ffsplat.models.operations import Operation  # type: ignore[import-untyped]
+from torchpq.clustering import KMeans  # type: ignore[import-untyped]
 
 from ..io.ply import encode_ply
 from ..models.fields import Field
 from ..models.gaussians import Gaussians
+from ..models.operations import Operation
 
 register_avif_opener()
 
@@ -259,6 +259,222 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
             raise ValueError(f"Unsupported file type: {file_type}")
 
 
+@lru_cache
+def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str, Field], defaultdict[str, list]]:  # noqa: C901
+    print("processing with cached_process_field")
+    field_op = op.params
+    field_name = next(iter(op.input_fields.keys()))
+    field_data = op.input_fields[field_name].data
+    field_dict = {}
+    decoding_update: defaultdict[str, list] = defaultdict(list)
+    match field_op:
+        case {
+            "cluster": {
+                "method": "kmeans",
+                "num_clusters": num_clusters,
+                "distance": distance,
+                "to_fields_with_prefix": to_fields_with_prefix,
+            }
+        }:
+            kmeans = KMeans(n_clusters=num_clusters, distance=distance, verbose=True)
+            labels = kmeans.fit(field_data.permute(1, 0).contiguous())
+            centroids = kmeans.centroids.permute(1, 0)
+            field_dict[f"{to_fields_with_prefix}labels"] = Field(labels)
+            field_dict[f"{to_fields_with_prefix}centroids"] = Field(centroids)
+            decoding_update[field_name].append({
+                "lookup": {
+                    "from_field": f"{to_fields_with_prefix}labels",
+                    "to_field": f"{to_fields_with_prefix}centroids",
+                }
+            })
+
+        case {"flatten": {"start_dim": start_dim}}:
+            target_shape = field_data.shape[start_dim:]
+            decoding_update[field_name].append({"reshape_from_dim": {"start_dim": start_dim, "shape": target_shape}})
+            field_data = field_data.flatten(start_dim=start_dim)
+
+        case {
+            "split": {
+                "to_fields_with_prefix": to_fields_with_prefix,
+                "split_size_or_sections": split_size_or_sections,
+                "dim": dim,
+            }
+        }:
+            chunks = field_data.split(split_size_or_sections, dim)
+            for i, chunk in enumerate(chunks):
+                field_dict[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim))
+
+            decoding_update[field_name].append({
+                "combine": {
+                    "from_fields_with_prefix": to_fields_with_prefix,
+                    "method": "stack" if split_size_or_sections == 1 else "concat",
+                    "dim": dim,
+                }
+            })
+
+        case {
+            "split": {
+                "to_field_list": to_field_list,
+                "split_size_or_sections": split_size_or_sections,
+                "dim": dim,
+                "squeeze": squeeze,
+            }
+        }:
+            chunks = field_data.split(split_size_or_sections, dim)
+            for target_field_name, chunk in zip(to_field_list, chunks):
+                if squeeze:
+                    chunk = chunk.squeeze(dim)
+                field_dict[target_field_name] = Field(chunk)
+
+            decoding_update[field_name].append({
+                "combine": {
+                    "from_field_list": to_field_list,
+                    "method": "stack" if split_size_or_sections == 1 else "concat",
+                    "dim": dim,
+                }
+            })
+
+        case {"reshape": {"shape": shape}}:
+            decoding_update[field_name].append({"reshape": {"shape": field_data.shape}})
+            field_data = field_data.reshape(*shape)
+
+        case {"remapping": {"method": "log"}}:
+            decoding_update[field_name].append({"remapping": {"method": "exp"}})
+            field_data = field_data.log()
+
+        case {"remapping": {"method": "signed-log"}}:
+            decoding_update[field_name].append({"remapping": {"method": "signed-exp"}})
+            field_data = torch.sign(field_data) * torch.log1p(torch.abs(field_data))
+
+        case {"remapping": {"method": "inverse-sigmoid"}}:
+            decoding_update[field_name].append({"remapping": {"method": "sigmoid"}})
+            # ensure that we can encode opacity values in the full range [0, 1]
+            # by clamping the values to (eps, 1 - eps) -> no infinite values from 0.0, 1.0
+            eps = 1e-6
+            field_data = field_data.clamp(eps, 1 - eps)
+            field_data = torch.log(field_data / (1 - field_data))
+
+        case {"remapping": {"method": "minmax", "min": min_val, "max": max_val}}:
+            field_min = field_data.min().item()
+            field_max = field_data.max().item()
+
+            min_val_f = float(min_val)
+            max_val_f = float(max_val)
+
+            decoding_update[field_name].append({
+                "remapping": {
+                    "method": "minmax",
+                    "min": field_min,
+                    "max": field_max,
+                }
+            })
+
+            field_data = minmax(field_data)
+            field_data = field_data * (max_val_f - min_val_f) + min_val_f
+
+        case {"remapping": {"method": "channelwise-minmax", "min": min_val, "max": max_val, "dim": dim}}:
+            min_val_f = float(min_val)
+            max_val_f = float(max_val)
+
+            min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+            max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+
+            decoding_update[field_name].append({
+                "remapping": {
+                    "method": "channelwise-minmax",
+                    "min_values": min_vals.tolist(),
+                    "max_values": max_vals.tolist(),
+                    "dim": dim,
+                }
+            })
+
+            field_range = max_vals - min_vals
+            field_range[field_range == 0] = 1.0
+
+            normalized = (field_data - min_vals) / field_range
+            normalized = normalized * (max_val_f - min_val_f) + min_val_f
+
+            field_data = normalized
+
+        case {"to_field": name}:
+            decoding_update[field_name].append({"from_field": name})
+            field_dict[name] = Field(field_data)
+
+        case {"to_tmp_field": name}:
+            # a field that is used during the encoding process, but is not required for decoding
+            # and is not stored in the output
+            field_dict[name] = Field(field_data)
+
+        case {"permute": {"dims": dims}}:
+            decoding_update[field_name].append({"permute": {"dims": dims}})
+            field_data = field_data.permute(*dims)
+
+        case {"to_dtype": {"dtype": dtype_str, "round_to_int": round_to_int}}:
+            torch_dtype_to_str = {
+                torch.float32: "float32",
+            }
+
+            if round_to_int:
+                field_data = torch.round(field_data)
+
+            decoding_update[field_name].append({"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}})
+            match dtype_str:
+                case "uint8":
+                    if field_data.min() < 0 or field_data.max() > 255:
+                        raise ValueError(
+                            f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                        )
+                    field_data = field_data.to(torch.uint8)
+                case "uint16":
+                    if field_data.min() < 0 or field_data.max() > 65535:
+                        raise ValueError(
+                            f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                        )
+                    field_data = field_data.to(torch.uint16)
+                case "int32":
+                    if field_data.min() < -2147483648 or field_data.max() > 2147483647:
+                        raise ValueError(
+                            f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                        )
+                    field_data = field_data.to(torch.int32)
+                case _:
+                    raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+
+        case {"split_bytes": {"to_fields_with_prefix": to_fields_with_prefix, "num_bytes": num_bytes}}:
+            num_bytes = int(num_bytes)
+
+            if num_bytes < 2 or num_bytes > 8:
+                raise ValueError("num_bytes must be between 2 and 8")
+
+            if torch.is_floating_point(field_data):
+                raise ValueError(f"Field data must be an integer data type, got {field_data.dtype}")
+
+            field_data = field_data.to(torch.int32) if num_bytes <= 4 else field_data.to(torch.int64)
+
+            res_field_names = []
+
+            for i in range(num_bytes):
+                mask = (field_data >> (i * 8)) & 0xFF
+                res_field_name = f"{to_fields_with_prefix}{i}"
+                res_field_names.append(res_field_name)
+                field_dict[res_field_name] = Field(mask.to(torch.uint8))
+
+            decoding_update[field_name].append({
+                "combine": {
+                    "from_field_list": res_field_names,
+                    "method": "bytes",
+                }
+            })
+
+        case _:
+            raise ValueError(f"Unsupported field operation: {field_op}")
+
+    new_field = Field(field_data)
+    old_field = op.input_fields[field_name]
+    new_field.ops = [*old_field.ops, op]
+    return new_field, field_dict, decoding_update
+
+
 @dataclass
 class SceneEncoder:
     encoding_params: EncodingParams
@@ -290,160 +506,17 @@ class SceneEncoder:
                     field_obj = self._process_field(Operation({field_name: field_obj}, field_op), verbose=verbose)
                     self.fields[field_name] = field_obj
 
-    def _process_field(self, op: Operation, verbose: bool) -> Field:  # noqa: C901
+    def _process_field(self, op: Operation, verbose: bool) -> Field:
         field_op = op.params
         field_name = next(iter(op.input_fields.keys()))
         field_data = op.input_fields[field_name].data
         match field_op:
-            case {
-                "cluster": {
-                    "method": "kmeans",
-                    "num_clusters": num_clusters,
-                    "distance": distance,
-                    "to_fields_with_prefix": to_fields_with_prefix,
-                }
-            }:
-                kmeans = KMeans(n_clusters=num_clusters, distance=distance, verbose=True)
-                labels = kmeans.fit(field_data.permute(1, 0).contiguous())
-                centroids = kmeans.centroids.permute(1, 0)
-                self.fields[f"{to_fields_with_prefix}labels"] = Field(labels)
-                self.fields[f"{to_fields_with_prefix}centroids"] = Field(centroids)
-                self.decoding_params.fields[field_name].append({
-                    "lookup": {
-                        "from_field": f"{to_fields_with_prefix}labels",
-                        "to_field": f"{to_fields_with_prefix}centroids",
-                    }
-                })
-
-            case {"flatten": {"start_dim": start_dim}}:
-                target_shape = field_data.shape[start_dim:]
-                self.decoding_params.fields[field_name].append({
-                    "reshape_from_dim": {"start_dim": start_dim, "shape": target_shape}
-                })
-                field_data = field_data.flatten(start_dim=start_dim)
-
-            case {
-                "split": {
-                    "to_fields_with_prefix": to_fields_with_prefix,
-                    "split_size_or_sections": split_size_or_sections,
-                    "dim": dim,
-                }
-            }:
-                chunks = field_data.split(split_size_or_sections, dim)
-                for i, chunk in enumerate(chunks):
-                    self.fields[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim))
-
-                self.decoding_params.fields[field_name].append({
-                    "combine": {
-                        "from_fields_with_prefix": to_fields_with_prefix,
-                        "method": "stack" if split_size_or_sections == 1 else "concat",
-                        "dim": dim,
-                    }
-                })
-
-            case {
-                "split": {
-                    "to_field_list": to_field_list,
-                    "split_size_or_sections": split_size_or_sections,
-                    "dim": dim,
-                    "squeeze": squeeze,
-                }
-            }:
-                chunks = field_data.split(split_size_or_sections, dim)
-                for target_field_name, chunk in zip(to_field_list, chunks):
-                    if squeeze:
-                        chunk = chunk.squeeze(dim)
-                    self.fields[target_field_name] = Field(chunk)
-
-                self.decoding_params.fields[field_name].append({
-                    "combine": {
-                        "from_field_list": to_field_list,
-                        "method": "stack" if split_size_or_sections == 1 else "concat",
-                        "dim": dim,
-                    }
-                })
-
-            case {"reshape": {"shape": shape}}:
-                self.decoding_params.fields[field_name].append({"reshape": {"shape": field_data.shape}})
-                field_data = field_data.reshape(*shape)
-
-            case {"remapping": {"method": "log"}}:
-                self.decoding_params.fields[field_name].append({"remapping": {"method": "exp"}})
-                field_data = field_data.log()
-
-            case {"remapping": {"method": "signed-log"}}:
-                self.decoding_params.fields[field_name].append({"remapping": {"method": "signed-exp"}})
-                field_data = torch.sign(field_data) * torch.log1p(torch.abs(field_data))
-
-            case {"remapping": {"method": "inverse-sigmoid"}}:
-                self.decoding_params.fields[field_name].append({"remapping": {"method": "sigmoid"}})
-                # ensure that we can encode opacity values in the full range [0, 1]
-                # by clamping the values to (eps, 1 - eps) -> no infinite values from 0.0, 1.0
-                eps = 1e-6
-                field_data = field_data.clamp(eps, 1 - eps)
-                field_data = torch.log(field_data / (1 - field_data))
-
-            case {"remapping": {"method": "minmax", "min": min_val, "max": max_val}}:
-                field_min = field_data.min().item()
-                field_max = field_data.max().item()
-
-                min_val_f = float(min_val)
-                max_val_f = float(max_val)
-
-                self.decoding_params.fields[field_name].append({
-                    "remapping": {
-                        "method": "minmax",
-                        "min": field_min,
-                        "max": field_max,
-                    }
-                })
-
-                field_data = minmax(field_data)
-                field_data = field_data * (max_val_f - min_val_f) + min_val_f
-
-            case {"remapping": {"method": "channelwise-minmax", "min": min_val, "max": max_val, "dim": dim}}:
-                min_val_f = float(min_val)
-                max_val_f = float(max_val)
-
-                min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
-                max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
-
-                self.decoding_params.fields[field_name].append({
-                    "remapping": {
-                        "method": "channelwise-minmax",
-                        "min_values": min_vals.tolist(),
-                        "max_values": max_vals.tolist(),
-                        "dim": dim,
-                    }
-                })
-
-                field_range = max_vals - min_vals
-                field_range[field_range == 0] = 1.0
-
-                normalized = (field_data - min_vals) / field_range
-                normalized = normalized * (max_val_f - min_val_f) + min_val_f
-
-                field_data = normalized
-
             case {"reindex": {"index_field": index_field_name}}:
                 index_field_obj = self.fields[index_field_name]
                 if len(index_field_obj.data.shape) != 2:
                     raise ValueError("Expecting grid for re-index operation")
                 self.decoding_params.fields[field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
                 field_data = field_data[index_field_obj.data]
-
-            case {"to_field": name}:
-                self.decoding_params.fields[field_name].append({"from_field": name})
-                self.fields[name] = Field(field_data)
-
-            case {"to_tmp_field": name}:
-                # a field that is used during the encoding process, but is not required for decoding
-                # and is not stored in the output
-                self.fields[name] = Field(field_data)
-
-            case {"permute": {"dims": dims}}:
-                self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
-                field_data = field_data.permute(*dims)
 
             case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
                 sorted_indices = plas_preprocess(
@@ -453,67 +526,12 @@ class SceneEncoder:
                 )
                 field_data = sorted_indices
 
-            case {"to_dtype": {"dtype": dtype_str, "round_to_int": round_to_int}}:
-                torch_dtype_to_str = {
-                    torch.float32: "float32",
-                }
-
-                if round_to_int:
-                    field_data = torch.round(field_data)
-
-                self.decoding_params.fields[field_name].append({
-                    "to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}
-                })
-                match dtype_str:
-                    case "uint8":
-                        if field_data.min() < 0 or field_data.max() > 255:
-                            raise ValueError(
-                                f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                            )
-                        field_data = field_data.to(torch.uint8)
-                    case "uint16":
-                        if field_data.min() < 0 or field_data.max() > 65535:
-                            raise ValueError(
-                                f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                            )
-                        field_data = field_data.to(torch.uint16)
-                    case "int32":
-                        if field_data.min() < -2147483648 or field_data.max() > 2147483647:
-                            raise ValueError(
-                                f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                            )
-                        field_data = field_data.to(torch.int32)
-                    case _:
-                        raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
-
-            case {"split_bytes": {"to_fields_with_prefix": to_fields_with_prefix, "num_bytes": num_bytes}}:
-                num_bytes = int(num_bytes)
-
-                if num_bytes < 2 or num_bytes > 8:
-                    raise ValueError("num_bytes must be between 2 and 8")
-
-                if torch.is_floating_point(field_data):
-                    raise ValueError(f"Field data must be an integer data type, got {field_data.dtype}")
-
-                field_data = field_data.to(torch.int32) if num_bytes <= 4 else field_data.to(torch.int64)
-
-                res_field_names = []
-
-                for i in range(num_bytes):
-                    mask = (field_data >> (i * 8)) & 0xFF
-                    res_field_name = f"{to_fields_with_prefix}{i}"
-                    res_field_names.append(res_field_name)
-                    self.fields[res_field_name] = Field(mask.to(torch.uint8))
-
-                self.decoding_params.fields[field_name].append({
-                    "combine": {
-                        "from_field_list": res_field_names,
-                        "method": "bytes",
-                    }
-                })
-
             case _:
-                raise ValueError(f"Unsupported field operation: {field_op}")
+                new_field, field_dict, decoding_update = cached_process_field(op, verbose=verbose)
+                self.fields.update(field_dict)
+                for key, op_list in decoding_update.items():
+                    self.decoding_params.fields[key].extend(op_list)
+                return new_field
 
         new_field = Field(field_data)
         old_field = op.input_fields[field_name]
