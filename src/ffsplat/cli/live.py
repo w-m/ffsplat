@@ -144,6 +144,7 @@ class InteractiveConversionTool:
         # self.viewer.add_test_functionality(self.change_scene)
 
     def convert(self, _):
+        print("Converting scene...")
         # we shouldn't redo the encoding completely every time, as resorting takes a lot of time
         encoding_params = self.encoding_params
         output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
@@ -152,7 +153,7 @@ class InteractiveConversionTool:
         encoder = SceneEncoder(
             encoding_params=encoding_params,
             output_path=output_path,
-            fields=self.input_gaussians.to_dict(),
+            fields=self.input_gaussians.to_field_dict(),
             decoding_params=DecodingParams(
                 container_identifier="smurfx",
                 container_version="0.1",
@@ -363,11 +364,11 @@ class InteractiveConversionTool:
     # Create render function with bound parameters
     def bound_render_fn(self, camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
         return self.render_fn(
-            self.gaussians.means,
-            self.gaussians.quaternions,
-            self.gaussians.scales,
-            self.gaussians.opacities,
-            self.gaussians.sh,
+            self.gaussians.means.data,
+            self.gaussians.quaternions.data,
+            self.gaussians.scales.data,
+            self.gaussians.opacities.data,
+            self.gaussians.sh.data,
             self.gaussians.sh_degree,
             camera_state,
             img_wh,

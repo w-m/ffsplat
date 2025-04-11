@@ -2,8 +2,9 @@ import math
 from dataclasses import dataclass
 
 import torch
-from jaxtyping import Float
 from torch import Tensor
+
+from ..models.fields import Field
 
 
 def attr_tensor_str(data: Tensor, num_primitives: int | None = None) -> str:
@@ -23,11 +24,11 @@ def attr_tensor_str(data: Tensor, num_primitives: int | None = None) -> str:
 
 @dataclass
 class Gaussians:
-    means: Float[Tensor, "N 3"]
-    quaternions: Float[Tensor, "N 4"]
-    scales: Float[Tensor, "N 3"]
-    opacities: Float[Tensor, " N"]
-    sh: Float[Tensor, "N S 3"]
+    means: Field
+    quaternions: Field
+    scales: Field
+    opacities: Field
+    sh: Field
 
     def __str__(self) -> str:
         """Return a compact string representation of the Gaussians."""
@@ -45,11 +46,11 @@ class Gaussians:
     @property
     def num_gaussians(self) -> int:
         """Get the number of gaussians from means attribute."""
-        return self.means.shape[0]
+        return self.means.data.shape[0]
 
     @property
     def device(self) -> torch.device:
-        return self.means.device
+        return self.means.data.device
 
     def to(self, device: str | torch.device) -> "Gaussians":
         return Gaussians(
@@ -65,13 +66,22 @@ class Gaussians:
         # TODO check this implementation
         # Data shape is (N, num_coeffs, 3), where num_coeffs = (degree + 1)^2
         # So num_coeffs = shape[1], and we solve for degree
-        return int(math.sqrt(self.sh.shape[1]) - 1)
+        return int(math.sqrt(self.sh.data.shape[1]) - 1)
 
-    def to_dict(self) -> dict:
+    def to_field_dict(self) -> dict:
         return {
             "means": self.means,
             "quaternions": self.quaternions,
             "scales": self.scales,
             "opacities": self.opacities,
             "sh": self.sh,
+        }
+
+    def to_dict(self) -> dict:
+        return {
+            "means": self.means.data,
+            "quaternions": self.quaternions.data,
+            "scales": self.scales.data,
+            "opacities": self.opacities.data,
+            "sh": self.sh.data,
         }
