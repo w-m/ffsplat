@@ -1,14 +1,15 @@
 import json
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..models.fields import Field
+if TYPE_CHECKING:
+    from ..models.fields import Field
 
 
 @dataclass
 class Operation:
-    input_fields: dict[str, Field]
+    input_fields: dict[str, "Field"]
     params: dict[str, Any]
 
     def __hash__(self) -> int:

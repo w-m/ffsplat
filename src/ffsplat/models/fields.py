@@ -1,17 +1,19 @@
 import json
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import Tensor
 
+if TYPE_CHECKING:
+    from ..models.operations import Operation
+
 
 class Field:
     data: Tensor
-    # TODO: :ops are operations, but importing Operation to type it is circular. How should I do this?
-    ops: list
+    ops: list["Operation"]
 
-    def __init__(self, data: Tensor):
+    def __init__(self, data: Tensor) -> None:
         self.data = data
         # TODO: this should never be empty, how to initalize it?
         self.ops = []
