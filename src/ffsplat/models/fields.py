@@ -1,3 +1,4 @@
+import json
 from hashlib import sha256
 from typing import Any
 
@@ -17,12 +18,16 @@ class Field:
 
     def __hash__(self) -> int:
         """Return the hash of the field."""
-        return sha256(self.to_json())
+        json_str = json.dumps(self.to_json())
+        return int(sha256(json_str).hexdigest(), 16)
+
+    def __eq__(self, value: object, /) -> bool:
+        # TODO: should this be equal with the same json or also with the same data?
+        return self.to_json() == value.to_json() if isinstance(value, Field) else False
 
     def to(self, device: str | torch.device) -> "Field":
         return Field(self.data.to(device))
 
     def to_json(self) -> list[dict[str, Any]]:
         """Convert the field to a JSON-serializable format."""
-        # TODO: as list? or should this be a json string?
         return [op.to_json() for op in self.ops]

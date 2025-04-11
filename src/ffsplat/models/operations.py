@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -11,7 +12,12 @@ class Operation:
     params: dict[str, Any]
 
     def __hash__(self) -> int:
-        return sha256(self.to_json())
+        json_str = json.dumps(self.to_json())
+        return int(sha256(json_str).hexdigest(), 16)
+
+    def __eq__(self, value: object, /) -> bool:
+        # TODO: should this be equal with the same json or also with the same data?
+        return self.to_json() == value.to_json() if isinstance(value, Operation) else False
 
     def to_json(self) -> dict[str, Any]:
         """Convert the operation to a JSON-serializable format."""
