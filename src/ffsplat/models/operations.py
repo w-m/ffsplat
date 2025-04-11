@@ -14,7 +14,7 @@ class Operation:
 
     def __hash__(self) -> int:
         json_str = json.dumps(self.to_json())
-        return int(sha256(json_str).hexdigest(), 16)
+        return int(sha256(json_str.encode()).hexdigest(), 16)
 
     def __eq__(self, value: object, /) -> bool:
         # TODO: should this be equal with the same json or also with the same data?

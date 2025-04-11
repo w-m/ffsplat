@@ -21,7 +21,7 @@ class Field:
     def __hash__(self) -> int:
         """Return the hash of the field."""
         json_str = json.dumps(self.to_json())
-        return int(sha256(json_str).hexdigest(), 16)
+        return int(sha256(json_str.encode()).hexdigest(), 16)
 
     def __eq__(self, value: object, /) -> bool:
         # TODO: should this be equal with the same json or also with the same data?
