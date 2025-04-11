@@ -12,9 +12,12 @@ from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
-from torchpq.clustering import KMeans  # type: ignore[import-untyped]
+from torchpq.clustering import KMeans
+
+from ffsplat.models.operations import Operation  # type: ignore[import-untyped]
 
 from ..io.ply import encode_ply
+from ..models.fields import Field
 from ..models.gaussians import Gaussians
 
 register_avif_opener()
@@ -184,8 +187,8 @@ def as_grid_img(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor], verbose: bool) -> Tensor:
-    primitive_filter = primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by], verbose)
+def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Field], verbose: bool) -> Tensor:
+    primitive_filter = primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by].data, verbose)
 
     # TODO untested
     match plas_cfg.scaling_fn:
@@ -201,7 +204,9 @@ def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Tensor], verbose: bo
     # attr_getter_fn = self.get_activated_attr_flat if sorting_cfg.activated else self.get_attr_flat
 
     attr_getter_fn = (
-        lambda attr_name: fields[attr_name][primitive_filter] if primitive_filter is not None else fields[attr_name]
+        lambda attr_name: fields[attr_name].data[primitive_filter]
+        if primitive_filter is not None
+        else fields[attr_name].data
     )
 
     params_to_sort: list[Tensor] = []
@@ -260,32 +265,35 @@ class SceneEncoder:
     output_path: Path
     decoding_params: DecodingParams
 
-    fields: dict[str, Tensor] = field(default_factory=dict)
+    fields: dict[str, Field] = field(default_factory=dict)
 
     def _print_field_stats(self) -> None:
         # TODO duplicated code from scene_decoder
         print("Encoded field statistics:")
-        for field_name, field_data in sorted(self.fields.items()):
-            stats = f"{field_name}: \t{tuple(field_data.shape)} | {field_data.dtype}"
-            if field_data.numel() > 0:
-                stats += f" | Min: {field_data.min().item():.4f} | Max: {field_data.max().item():.4f}"
-                stats += f" | Median: {field_data.median().item():.4f}"
-                # stats += f" | Unique Count: {field_data.unique().numel()}"
+        for field_name, field_obj in sorted(self.fields.items()):
+            stats = f"{field_name}: \t{tuple(field_obj.data.shape)} | {field_obj.data.dtype}"
+            if field_obj.data.numel() > 0:
+                stats += f" | Min: {field_obj.data.min().item():.4f} | Max: {field_obj.data.max().item():.4f}"
+                stats += f" | Median: {field_obj.data.median().item():.4f}"
+                # stats += f" | Unique Count: {field_obj.data.unique().numel()}"
             print(stats)
 
     def _encode_fields(self, verbose: bool) -> None:
         # go through the fields of encoding params
         for field_name, field_config in self.encoding_params.fields.items():
-            field_data = self.fields.get(field_name)
+            field_obj = self.fields.get(field_name)
 
             for field_op in field_config:
                 if isinstance(field_op, dict):
-                    if field_data is None:
+                    if field_obj is None:
                         raise ValueError(f"Field '{field_name}' not found in input fields.")
-                    field_data = self._process_field(field_name, field_op, field_data, verbose=verbose)
-                    self.fields[field_name] = field_data
+                    field_obj = self._process_field(Operation({field_name: field_obj}, field_op), verbose=verbose)
+                    self.fields[field_name] = field_obj
 
-    def _process_field(self, field_name: str, field_op: dict[str, Any], field_data: Tensor, verbose: bool) -> Tensor:  # noqa: C901
+    def _process_field(self, op: Operation, verbose: bool) -> Field:  # noqa: C901
+        field_op = op.params
+        field_name = next(iter(op.input_fields.keys()))
+        field_data = op.input_fields[field_name].data
         match field_op:
             case {
                 "cluster": {
@@ -298,8 +306,8 @@ class SceneEncoder:
                 kmeans = KMeans(n_clusters=num_clusters, distance=distance, verbose=True)
                 labels = kmeans.fit(field_data.permute(1, 0).contiguous())
                 centroids = kmeans.centroids.permute(1, 0)
-                self.fields[f"{to_fields_with_prefix}labels"] = labels
-                self.fields[f"{to_fields_with_prefix}centroids"] = centroids
+                self.fields[f"{to_fields_with_prefix}labels"] = Field(labels)
+                self.fields[f"{to_fields_with_prefix}centroids"] = Field(centroids)
                 self.decoding_params.fields[field_name].append({
                     "lookup": {
                         "from_field": f"{to_fields_with_prefix}labels",
@@ -323,7 +331,7 @@ class SceneEncoder:
             }:
                 chunks = field_data.split(split_size_or_sections, dim)
                 for i, chunk in enumerate(chunks):
-                    self.fields[f"{to_fields_with_prefix}{i}"] = chunk.squeeze(dim)
+                    self.fields[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim))
 
                 self.decoding_params.fields[field_name].append({
                     "combine": {
@@ -345,7 +353,7 @@ class SceneEncoder:
                 for target_field_name, chunk in zip(to_field_list, chunks):
                     if squeeze:
                         chunk = chunk.squeeze(dim)
-                    self.fields[target_field_name] = chunk
+                    self.fields[target_field_name] = Field(chunk)
 
                 self.decoding_params.fields[field_name].append({
                     "combine": {
@@ -418,20 +426,20 @@ class SceneEncoder:
                 field_data = normalized
 
             case {"reindex": {"index_field": index_field_name}}:
-                index_field = self.fields[index_field_name]
-                if len(index_field.shape) != 2:
+                index_field_obj = self.fields[index_field_name]
+                if len(index_field_obj.data.shape) != 2:
                     raise ValueError("Expecting grid for re-index operation")
                 self.decoding_params.fields[field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
-                field_data = field_data[index_field]
+                field_data = field_data[index_field_obj.data]
 
             case {"to_field": name}:
                 self.decoding_params.fields[field_name].append({"from_field": name})
-                self.fields[name] = field_data
+                self.fields[name] = Field(field_data)
 
             case {"to_tmp_field": name}:
                 # a field that is used during the encoding process, but is not required for decoding
                 # and is not stored in the output
-                self.fields[name] = field_data
+                self.fields[name] = Field(field_data)
 
             case {"permute": {"dims": dims}}:
                 self.decoding_params.fields[field_name].append({"permute": {"dims": dims}})
@@ -495,7 +503,7 @@ class SceneEncoder:
                     mask = (field_data >> (i * 8)) & 0xFF
                     res_field_name = f"{to_fields_with_prefix}{i}"
                     res_field_names.append(res_field_name)
-                    self.fields[res_field_name] = mask.to(torch.uint8)
+                    self.fields[res_field_name] = Field(mask.to(torch.uint8))
 
                 self.decoding_params.fields[field_name].append({
                     "combine": {
@@ -507,15 +515,18 @@ class SceneEncoder:
             case _:
                 raise ValueError(f"Unsupported field operation: {field_op}")
 
-        return field_data
+        new_field = Field(field_data)
+        old_field = op.input_fields[field_name]
+        new_field.ops = [*old_field.ops, op]
+        return new_field
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
             match file:
                 case {"from_fields_with_prefix": field_prefix, "type": "ply", "file_path": file_path}:
                     fields_to_write = {
-                        field_name[len(field_prefix) :]: field_data
-                        for field_name, field_data in self.fields.items()
+                        field_name[len(field_prefix) :]: field_obj.data
+                        for field_name, field_obj in self.fields.items()
                         if field_name.startswith(field_prefix)
                     }
 
@@ -529,7 +540,7 @@ class SceneEncoder:
 
                     encode_ply(fields=fields_to_write, path=output_file_path)
                 case {"from_field": field_name, "type": file_type, "coding_params": coding_params}:
-                    field_data = self.fields[field_name]
+                    field_data = self.fields[field_name].data
                     file_path = f"{field_name}.{file_type}"
                     output_file_path = self.output_path / file_path
 
@@ -551,7 +562,8 @@ class SceneEncoder:
                     "type": file_type,
                     "coding_params": coding_params,
                 }:
-                    for field_name, field_data in self.fields.items():
+                    for field_name, field_obj in self.fields.items():
+                        field_data = field_obj.data
                         if field_name.startswith(field_prefix):
                             file_path = f"{field_name}.{file_type}"
                             output_file_path = self.output_path / file_path
@@ -577,7 +589,7 @@ class SceneEncoder:
 
         # empty base field for PLAS, which picks several input fields
         # TODO review design
-        self.fields["_"] = torch.empty(0)
+        self.fields["_"] = Field(torch.empty(0))
 
         self._encode_fields(verbose=verbose)
 
@@ -612,7 +624,7 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
     encoder = SceneEncoder(
         encoding_params=encoding_params,
         output_path=output_path,
-        fields=gaussians.to_dict(),
+        fields=gaussians.to_field_dict(),
         decoding_params=DecodingParams(
             container_identifier="smurfx",
             container_version="0.1",
