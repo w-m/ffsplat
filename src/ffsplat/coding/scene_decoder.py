@@ -11,6 +11,7 @@ from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from torch import Tensor
 
 from ..io.ply import decode_ply
+from ..models.fields import Field
 from ..models.gaussians import Gaussians
 
 # Register AVIF support
@@ -254,11 +255,11 @@ class SceneDecoder:
         match self.decoding_params.scene.get("primitives"):
             case "3DGS-INRIA":
                 self.scene = Gaussians(
-                    means=self.fields["means"],
-                    quaternions=self.fields["quaternions"],
-                    scales=self.fields["scales"],
-                    opacities=self.fields["opacities"],
-                    sh=self.fields["sh"],
+                    means=Field(self.fields["means"]),
+                    quaternions=Field(self.fields["quaternions"]),
+                    scales=Field(self.fields["scales"]),
+                    opacities=Field(self.fields["opacities"]),
+                    sh=Field(self.fields["sh"]),
                 )
             case _:
                 raise ValueError("Unsupported scene format")
