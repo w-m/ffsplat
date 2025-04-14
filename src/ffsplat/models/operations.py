@@ -17,7 +17,6 @@ class Operation:
         return int(sha256(json_str.encode()).hexdigest(), 16)
 
     def __eq__(self, value: object, /) -> bool:
-        # TODO: should this be equal with the same json or also with the same data?
         return self.to_json() == value.to_json() if isinstance(value, Operation) else False
 
     def to_json(self) -> dict[str, Any]:

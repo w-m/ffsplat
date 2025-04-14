@@ -279,8 +279,8 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
             kmeans = KMeans(n_clusters=num_clusters, distance=distance, verbose=True)
             labels = kmeans.fit(field_data.permute(1, 0).contiguous())
             centroids = kmeans.centroids.permute(1, 0)
-            field_dict[f"{to_fields_with_prefix}labels"] = Field(labels)
-            field_dict[f"{to_fields_with_prefix}centroids"] = Field(centroids)
+            field_dict[f"{to_fields_with_prefix}labels"] = Field(labels, op)
+            field_dict[f"{to_fields_with_prefix}centroids"] = Field(centroids, op)
             decoding_update[field_name].append({
                 "lookup": {
                     "from_field": f"{to_fields_with_prefix}labels",
@@ -302,7 +302,7 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
         }:
             chunks = field_data.split(split_size_or_sections, dim)
             for i, chunk in enumerate(chunks):
-                field_dict[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim))
+                field_dict[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim), op)
 
             decoding_update[field_name].append({
                 "combine": {
@@ -324,7 +324,7 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
             for target_field_name, chunk in zip(to_field_list, chunks):
                 if squeeze:
                     chunk = chunk.squeeze(dim)
-                field_dict[target_field_name] = Field(chunk)
+                field_dict[target_field_name] = Field(chunk, op)
 
             decoding_update[field_name].append({
                 "combine": {
@@ -398,12 +398,12 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
 
         case {"to_field": name}:
             decoding_update[field_name].append({"from_field": name})
-            field_dict[name] = Field(field_data)
+            field_dict[name] = Field(field_data, op)
 
         case {"to_tmp_field": name}:
             # a field that is used during the encoding process, but is not required for decoding
             # and is not stored in the output
-            field_dict[name] = Field(field_data)
+            field_dict[name] = Field(field_data, op)
 
         case {"permute": {"dims": dims}}:
             decoding_update[field_name].append({"permute": {"dims": dims}})
@@ -457,7 +457,7 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
                 mask = (field_data >> (i * 8)) & 0xFF
                 res_field_name = f"{to_fields_with_prefix}{i}"
                 res_field_names.append(res_field_name)
-                field_dict[res_field_name] = Field(mask.to(torch.uint8))
+                field_dict[res_field_name] = Field(mask.to(torch.uint8), op)
 
             decoding_update[field_name].append({
                 "combine": {
@@ -469,9 +469,7 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
         case _:
             raise ValueError(f"Unsupported field operation: {field_op}")
 
-    new_field = Field(field_data)
-    old_field = op.input_fields[field_name]
-    new_field.ops = [*old_field.ops, op]
+    new_field = Field(field_data, op)
     return new_field, field_dict, decoding_update
 
 
@@ -533,9 +531,7 @@ class SceneEncoder:
                     self.decoding_params.fields[key].extend(op_list)
                 return new_field
 
-        new_field = Field(field_data)
-        old_field = op.input_fields[field_name]
-        new_field.ops = [*old_field.ops, op]
+        new_field = Field(field_data, op)
         return new_field
 
     def _write_files(self) -> None:
@@ -607,7 +603,7 @@ class SceneEncoder:
 
         # empty base field for PLAS, which picks several input fields
         # TODO review design
-        self.fields["_"] = Field(torch.empty(0))
+        self.fields["_"] = Field.from_name(torch.empty(0), "_")
 
         self._encode_fields(verbose=verbose)
 

@@ -255,11 +255,11 @@ class SceneDecoder:
         match self.decoding_params.scene.get("primitives"):
             case "3DGS-INRIA":
                 self.scene = Gaussians(
-                    means=Field(self.fields["means"]),
-                    quaternions=Field(self.fields["quaternions"]),
-                    scales=Field(self.fields["scales"]),
-                    opacities=Field(self.fields["opacities"]),
-                    sh=Field(self.fields["sh"]),
+                    means=Field.from_name(self.fields["means"], "means"),
+                    quaternions=Field.from_name(self.fields["quaternions"], "quaternions"),
+                    scales=Field.from_name(self.fields["scales"], "scales"),
+                    opacities=Field.from_name(self.fields["opacities"], "opacities"),
+                    sh=Field.from_name(self.fields["sh"], "sh"),
                 )
             case _:
                 raise ValueError("Unsupported scene format")
