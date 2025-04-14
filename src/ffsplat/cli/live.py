@@ -145,11 +145,9 @@ class InteractiveConversionTool:
 
     def convert(self, _):
         print("Converting scene...")
-        # we shouldn't redo the encoding completely every time, as resorting takes a lot of time
         encoding_params = self.encoding_params
         output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
 
-        # TODO: use tempfile
         encoder = SceneEncoder(
             encoding_params=encoding_params,
             output_path=output_path,
@@ -163,16 +161,12 @@ class InteractiveConversionTool:
                 scene=encoding_params.scene,
             ),
         )
-        # encode writes yaml to output_path but ply to working directory
-        # also container meta does not contain the files and the scene data
         encoder.encode(verbose=self.verbose)
 
         # add scene to scene list and load it to view the scene
         output_format = self.viewer._output_dropdown.value
         self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
 
-    # TODO: add a button to save the scene in an output directory?
-    # should we be able to remove scenes again? scenes are removed on program termination
     def _add_scene(self, description, data_path, input_format):
         self.scenes.append(
             SceneData(id=len(self.scenes), description=description, data_path=data_path, input_format=input_format)
@@ -243,6 +237,7 @@ class InteractiveConversionTool:
         pass
 
     def _build_convert_options(self, _):
+        # TODO: this should be refactored once the Field and Operation classes are ready
         # this is not a class function of the viewer to store the handles in a dict in this class. this is to separate the logic of the conversion from the viewer. this way we can store the handles and their data needed for the conversion in this class
         # clear previous gui conversion handles
         # TODO: should we store the handles in the viewer? or should we store them in this class?
@@ -280,7 +275,6 @@ class InteractiveConversionTool:
                     else:
                         self.viewer.convert_gui_handles.append(field_folder)
 
-    # TODO: add file size to table? and to eval.py
     def _eval(self, scene_id):
         print("Running evaluation...")
         device = "cuda"
