@@ -10,61 +10,68 @@ scene:
     - quaternions
     - sh
 
-fields:
-  sh:
-    - split:
-        to_field_list: [f_dc, f_rest]
-        split_size_or_sections: [1, 15]
-        dim: 1
-        squeeze: false
+ops:
+  - input_fields: [sh]
+    ops:
+      - split:
+          split_size_or_sections: [1, 15]
+          dim: 1
+          squeeze: false
+    out_fields: [f_dc, f_rest]
 
-  f_dc:
-    - flatten:
-        start_dim: 1
-    - split:
-        to_fields_with_prefix: point_cloud.ply@f_dc_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [f_dc]
+    ops:
+      - flatten:
+          start_dim: 1
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+    out_field_prefix: point_cloud.ply@f_dc
 
-  f_rest:
-    - permute:
-        dims: [0, 2, 1]
-    - flatten:
-        start_dim: 1
-    - split:
-        to_fields_with_prefix: point_cloud.ply@f_rest_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [f_rest]
+    ops:
+      - permute:
+          dims: [0, 2, 1]
+      - flatten:
+          start_dim: 1
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+    out_field_prefix: point_cloud.ply@f_rest_
 
-  quaternions:
-    - split:
-        to_fields_with_prefix: point_cloud.ply@rot_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [quaternions]
+    ops:
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+    out_field_prefix: point_cloud.ply@rot_
 
-  means:
-    - split:
-        to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [means]
+    ops:
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+    out_fields: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
 
-  scales:
-    - remapping:
-        method: log
-    - split:
-        to_fields_with_prefix: point_cloud.ply@scale_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [scales]
+    ops:
+      - remapping:
+          method: log
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+    out_field_prefix: point_cloud.ply@scale_
 
-  opacities:
-    - remapping:
-        method: inverse-sigmoid
-    - to_field: point_cloud.ply@opacity
+  - input_fields: [opacities]
+    ops:
+      - remapping:
+          method: inverse-sigmoid
+    out_fields: [point_cloud.ply@opacity]
 
 files:
   - from_fields_with_prefix: point_cloud.ply@
