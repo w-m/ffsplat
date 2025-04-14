@@ -17,16 +17,22 @@ from torch import Tensor
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from ..cli.eval import eval_step, get_directory_size
-from ..coding.scene_decoder import decode_gaussians
-from ..coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
-from ..datasets.blenderparser import BlenderParser
-from ..datasets.colmapparser import ColmapParser
-from ..datasets.dataset import Dataset
-from ..render.viewer import CameraState, Viewer
+from ffsplat.cli.eval import eval_step, get_directory_size
+from ffsplat.coding.scene_decoder import decode_gaussians
+from ffsplat.coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
+from ffsplat.datasets.blenderparser import BlenderParser
+from ffsplat.datasets.colmapparser import ColmapParser
+from ffsplat.datasets.dataset import Dataset
+from ffsplat.render.viewer import CameraState, Viewer
 
 # TODO: this is a duplicate with the viewer
-encoding_formats: list[str] = ["3DGS_INRIA_ply", "SOG-web"]  # available formats
+encoding_formats: list[str] = [
+    "3DGS_INRIA_ply",
+    "3DGS_INRIA_nosh_ply",
+    "SOG-web",
+    "SOG-web-nosh",
+    "SOG-web-sh-split",
+]  # available formats
 
 operations: dict[str, list[str]] = {
     "remapping": ["inverse-sigmoid", "log", "channelwise-minmax", "signed-log"]
@@ -249,6 +255,8 @@ class InteractiveConversionTool:
         self.encoding_handler = {}
         output_format = self.viewer._output_dropdown.value
         self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+        # remove this return when refactoring this function. see line 240
+        return
 
         # TODO: why is this in this with block?
         with self.viewer.convert_folder:
