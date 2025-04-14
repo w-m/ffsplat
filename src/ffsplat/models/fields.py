@@ -29,9 +29,11 @@ class Field:
     def from_file(cls, data: Tensor, file_path: Path) -> "Field":
         """Create a field from a file instead of a operation"""
 
+        # TODO: set out_field
         op = Operation(
             input_fields={},
             params={"from file": file_path, "last modified": file_path.stat().st_mtime},
+            out_field="_",
         )
         return cls(data, op)
 
@@ -41,6 +43,7 @@ class Field:
         op = Operation(
             input_fields={},
             params={"name": name},
+            out_field="name",
         )
         return cls(data, op)
 

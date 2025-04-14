@@ -103,7 +103,7 @@ class EncodingParams:
 
     scene: dict[str, Any]
 
-    fields: dict[str, dict[str, Any]]
+    ops: list[dict[str, Any]]
     files: list[dict[str, str]]
 
     @classmethod
@@ -114,7 +114,7 @@ class EncodingParams:
             profile=data["profile"],
             profile_version=data["profile_version"],
             scene=data["scene"],
-            fields=data["fields"],
+            ops=data["ops"],
             files=data.get("files", []),
         )
 
@@ -259,13 +259,12 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
             raise ValueError(f"Unsupported file type: {file_type}")
 
 
-@lru_cache
-def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str, Field], defaultdict[str, list]]:  # noqa: C901
+def process_field(  # noqa: C901
+    field_dict: dict[str, Field], field_op: dict[str, Any], verbose: bool
+) -> tuple[Field, dict[str, Field], defaultdict[str, list]]:
     print("processing with cached_process_field")
-    field_op = op.params
-    field_name = next(iter(op.input_fields.keys()))
-    field_data = op.input_fields[field_name].data
-    field_dict = {}
+    field_name = next(iter(field_dict.keys()))
+    field_data = field_dict[field_name].data
     decoding_update: defaultdict[str, list] = defaultdict(list)
     match field_op:
         case {
@@ -465,12 +464,44 @@ def cached_process_field(op: Operation, verbose: bool) -> tuple[Field, dict[str,
                     "method": "bytes",
                 }
             })
+        case {"reindex": {"index_field": index_field_name}}:
+            index_field_obj = field_dict[index_field_name]
+            if len(index_field_obj.data.shape) != 2:
+                raise ValueError("Expecting grid for re-index operation")
+            decoding_update[field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
+            field_data = field_data[index_field_obj.data]
+
+        case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
+            sorted_indices = plas_preprocess(
+                plas_cfg=PLASConfig(**plas_cfg_dict),
+                fields=field_dict,
+                verbose=verbose,
+            )
+            field_data = sorted_indices
 
         case _:
             raise ValueError(f"Unsupported field operation: {field_op}")
 
     new_field = Field(field_data, op)
     return new_field, field_dict, decoding_update
+
+
+@lru_cache
+def process_operation(op: Operation, verbose: bool) -> dict[str, Field]:
+    """Process the operation and update the fields."""
+    input_fields = op.input_fields.copy()
+
+    # is it a good idea to store temporary fields without name?
+    # they need to be an input to the next operation. just the next operation or might they be used in the future?
+    # the temp_fields from the last process_field should be named with op.out_field and returned
+    # the code in process_field does not work. it is just copied from the old process_field but not refactored for the new encoding format
+    # TODO: handle decoding params updates
+    temp_fields = []
+    for params in op.params:
+        temp_fields = process_field(input_fields, params, verbose=verbose)
+
+    new_fields = {}
+    return new_fields
 
 
 @dataclass
@@ -493,46 +524,28 @@ class SceneEncoder:
             print(stats)
 
     def _encode_fields(self, verbose: bool) -> None:
-        # go through the fields of encoding params
-        for field_name, field_config in self.encoding_params.fields.items():
-            field_obj = self.fields.get(field_name)
+        """Process the fields according to the operations defined in the encoding parameters."""
+        for op_params in self.encoding_params.ops:
+            # build the operation
+            # TODO: should we have a from_dict method for Operation?
+            input_fields = {}
+            for field_name in op_params["input_fields"]:
+                if field_name not in self.fields:
+                    raise ValueError(f"Field '{field_name}' not found in input fields.")
+                input_fields[field_name] = self.fields[field_name]
+            # TODO: how to handle output fields?
+            if "out_fields" in op_params:
+                output = op_params["out_fields"]
+            elif "out_field_prefix" in op_params:
+                output = op_params["out_field_prefix"]
+            else:
+                raise ValueError("No output field(s) specified in operation parameters.")
 
-            for field_op in field_config:
-                if isinstance(field_op, dict):
-                    if field_obj is None:
-                        raise ValueError(f"Field '{field_name}' not found in input fields.")
-                    field_obj = self._process_field(Operation({field_name: field_obj}, field_op), verbose=verbose)
-                    self.fields[field_name] = field_obj
+            op = Operation(input_fields, op_params["ops"], output)
 
-    def _process_field(self, op: Operation, verbose: bool) -> Field:
-        field_op = op.params
-        field_name = next(iter(op.input_fields.keys()))
-        field_data = op.input_fields[field_name].data
-        match field_op:
-            case {"reindex": {"index_field": index_field_name}}:
-                index_field_obj = self.fields[index_field_name]
-                if len(index_field_obj.data.shape) != 2:
-                    raise ValueError("Expecting grid for re-index operation")
-                self.decoding_params.fields[field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
-                field_data = field_data[index_field_obj.data]
-
-            case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
-                sorted_indices = plas_preprocess(
-                    plas_cfg=PLASConfig(**plas_cfg_dict),
-                    fields=self.fields,
-                    verbose=verbose,
-                )
-                field_data = sorted_indices
-
-            case _:
-                new_field, field_dict, decoding_update = cached_process_field(op, verbose=verbose)
-                self.fields.update(field_dict)
-                for key, op_list in decoding_update.items():
-                    self.decoding_params.fields[key].extend(op_list)
-                return new_field
-
-        new_field = Field(field_data, op)
-        return new_field
+            # process the operations
+            new_fields = process_operation(op, verbose=verbose)
+            self.fields.update(new_fields)
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
