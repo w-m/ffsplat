@@ -27,7 +27,7 @@ ops:
           split_size_or_sections: 1
           dim: 1
           squeeze: true
-    out_field_prefix: point_cloud.ply@f_dc
+    out_field_prefix: point_cloud.ply@f_dc_
 
   - input_fields: [f_rest]
     ops:
