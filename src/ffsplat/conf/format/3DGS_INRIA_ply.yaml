@@ -17,7 +17,7 @@ ops:
           split_size_or_sections: [1, 15]
           dim: 1
           squeeze: false
-    out_fields: [f_dc, f_rest]
+          to_field_list: [f_dc, f_rest]
 
   - input_fields: [f_dc]
     ops:
@@ -27,7 +27,7 @@ ops:
           split_size_or_sections: 1
           dim: 1
           squeeze: true
-    out_field_prefix: point_cloud.ply@f_dc_
+          to_fields_with_prefix: point_cloud.ply@f_dc_
 
   - input_fields: [f_rest]
     ops:
@@ -39,7 +39,7 @@ ops:
           split_size_or_sections: 1
           dim: 1
           squeeze: true
-    out_field_prefix: point_cloud.ply@f_rest_
+          to_fields_with_prefix: point_cloud.ply@f_rest_
 
   - input_fields: [quaternions]
     ops:
@@ -47,7 +47,7 @@ ops:
           split_size_or_sections: 1
           dim: 1
           squeeze: true
-    out_field_prefix: point_cloud.ply@rot_
+          to_fields_with_prefix: point_cloud.ply@rot_
 
   - input_fields: [means]
     ops:
@@ -55,7 +55,8 @@ ops:
           split_size_or_sections: 1
           dim: 1
           squeeze: true
-    out_fields: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+          to_field_list:
+            [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
 
   - input_fields: [scales]
     ops:
@@ -65,13 +66,13 @@ ops:
           split_size_or_sections: 1
           dim: 1
           squeeze: true
-    out_field_prefix: point_cloud.ply@scale_
+          to_fields_with_prefix: point_cloud.ply@scale_
 
   - input_fields: [opacities]
     ops:
       - remapping:
           method: inverse-sigmoid
-    out_fields: [point_cloud.ply@opacity]
+      - to_field: point_cloud.ply@opacity
 
 files:
   - from_fields_with_prefix: point_cloud.ply@

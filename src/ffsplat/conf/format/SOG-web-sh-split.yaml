@@ -17,7 +17,7 @@ ops:
           split_size_or_sections: [1, 15]
           dim: 1
           squeeze: false
-    out_fields: [f_dc, f_rest]
+          to_field_list: [f_dc, f_rest]
 
   - input_fields: [means]
     ops:
@@ -33,7 +33,7 @@ ops:
           round_to_int: true
       - split_bytes:
           num_bytes: 2
-    out_field_prefix: means_bytes_
+          to_fields_with_prefix: means_bytes_
 
   - input_fields:
       [
@@ -51,8 +51,9 @@ ops:
           scaling_fn: standardize
           # activated: true
           shuffle: true
-          improvement_break: 1e-4
-          # improvement_break: 0.1
+          # improvement_break: 1e-4
+          improvement_break: 0.1
+          to_field: sorted_indices
           weights:
             means_bytes_0: 0.1
             means_bytes_1: 1.0
@@ -61,21 +62,18 @@ ops:
             opacities: 0.0
             scales: 1.0
             quaternions: 0.0
-    out_fields: [sorted_indices]
 
   - input_fields: [means_bytes_0, sorted_indices]
     ops:
       - reindex:
           src_field: means_bytes_0
           index_field: sorted_indices
-    out_fields: [means_bytes_0]
 
   - input_fields: [means_bytes_1, sorted_indices]
     ops:
       - reindex:
           src_field: means_bytes_1
           index_field: sorted_indices
-    out_fields: [means_bytes_1]
 
   - input_fields: [f_dc]
     ops:
@@ -89,14 +87,12 @@ ops:
       - to_dtype:
           dtype: uint8
           round_to_int: true
-    out_fields: [f_dc]
 
   - input_fields: [f_dc, sorted_indices]
     ops:
       - reindex:
           src_field: f_dc
           index_field: sorted_indices
-    out_fields: [f_dc]
 
   - input_fields: [f_rest]
     ops:
@@ -112,14 +108,12 @@ ops:
       - to_dtype:
           dtype: uint8
           round_to_int: true
-    out_fields: [f_rest]
 
   - input_fields: [f_rest, sorted_indices]
     ops:
       - reindex:
           src_field: f_rest
           index_field: sorted_indices
-    out_fields: [f_rest]
 
   - input_fields: [f_rest]
     ops:
@@ -127,7 +121,7 @@ ops:
           split_size_or_sections: 3
           dim: 2
           squeeze: true
-    out_field_prefix: f_rest_
+          to_fields_with_prefix: f_rest_
 
   - input_fields: [quaternions]
     ops:
@@ -139,14 +133,12 @@ ops:
       - to_dtype:
           dtype: uint8
           round_to_int: true
-    out_fields: [quaternions]
 
   - input_fields: [quaternions, sorted_indices]
     ops:
       - reindex:
           src_field: quaternions
           index_field: sorted_indices
-    out_fields: [quaternions]
 
   - input_fields: [scales]
     ops:
@@ -160,14 +152,12 @@ ops:
       - to_dtype:
           dtype: uint8
           round_to_int: true
-    out_fields: [scales]
 
   - input_fields: [scales, sorted_indices]
     ops:
       - reindex:
           src_field: scales
           index_field: sorted_indices
-    out_fields: [scales]
 
   - input_fields: [opacities]
     ops:
@@ -181,14 +171,12 @@ ops:
       - to_dtype:
           dtype: uint8
           round_to_int: true
-    out_fields: [opacities]
 
   - input_fields: [opacities, sorted_indices]
     ops:
       - reindex:
           src_field: opacities
           index_field: sorted_indices
-    out_fields: [opacities]
 
 files:
   - from_field: opacities
