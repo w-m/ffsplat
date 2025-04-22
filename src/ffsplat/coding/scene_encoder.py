@@ -136,6 +136,8 @@ class PLASConfig:
     # activated: bool
     shuffle: bool
     improvement_break: float
+    # this is not needed for plas, just to now where to store the result
+    to_field: str
     weights: dict[str, float] = field(default_factory=dict)
 
 
@@ -259,39 +261,49 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
             raise ValueError(f"Unsupported file type: {file_type}")
 
 
-def process_field(  # noqa: C901
+# TODO: the processing should be part of the operation class or of a member object then we cann use this function as the cached wrapper for that
+@lru_cache
+def process_operation(  # noqa: C901
     op: Operation,
-    field_op: dict[str, Any],
-    field_dict: dict[str, Field],
-    decoding_update: defaultdict[str, list],
     verbose: bool,
-) -> None:
+) -> tuple[dict[str, Field], defaultdict[str, list]]:
+    print("Processing operation without using cache")
     # often field dict contains only one field. if it contains only one field, we want the variable field_data to
     # be the data of that field
     # if it contains more than one field the handling of which field to use is up to the operation
-    if len(field_dict) == 1:
-        field_name = next(iter(field_dict.keys()))
-        field_data = field_dict[field_name].data
+    decoding_update: defaultdict[str, list] = defaultdict(list)
+
+    if len(op.input_fields) == 1:
+        field_name = next(iter(op.input_fields.keys()))
+        field_data = op.input_fields[field_name].data
     else:
         field_data = None
 
+    field_op = op.params
+    new_fields: dict[str, Field] = {}
+
     match field_op:
+        case {"to_field": to_field}:
+            decoding_update[field_name].append({"from_field": to_field})
+            new_fields[to_field] = Field(field_data, op)
+            return new_fields, decoding_update
         case {
             "cluster": {
                 "method": "kmeans",
                 "num_clusters": num_clusters,
                 "distance": distance,
+                "to_fields_with_prefix": to_fields_with_prefix,
             }
         }:
             kmeans = KMeans(n_clusters=num_clusters, distance=distance, verbose=True)
             labels = kmeans.fit(field_data.permute(1, 0).contiguous())
             centroids = kmeans.centroids.permute(1, 0)
-            field_dict[f"{op.out_field}labels"] = Field(labels, op)
-            field_dict[f"{op.out_field}centroids"] = Field(centroids, op)
+            new_fields[f"{to_fields_with_prefix}labels"] = Field(labels, op)
+            new_fields[f"{to_fields_with_prefix}centroids"] = Field(centroids, op)
             decoding_update[field_name].append({
                 "lookup": {
-                    "from_field": f"{op.out_field}labels",
-                    "to_field": f"{op.out_field}centroids",
+                    "from_field": f"{to_fields_with_prefix}labels",
+                    "to_field": f"{to_fields_with_prefix}centroids",
                 }
             })
 
@@ -300,23 +312,23 @@ def process_field(  # noqa: C901
             decoding_update[field_name].append({"reshape_from_dim": {"start_dim": start_dim, "shape": target_shape}})
             field_data = field_data.flatten(start_dim=start_dim)
 
-        # TODO: the two different split cases are only handled correctly if its in this order
         case {
             "split": {
                 "split_size_or_sections": split_size_or_sections,
                 "dim": dim,
                 "squeeze": squeeze,
+                "to_field_list": to_field_list,
             }
-        } if isinstance(op.out_field, list):
+        }:
             chunks = field_data.split(split_size_or_sections, dim)
-            for target_field_name, chunk in zip(op.out_field, chunks):
+            for target_field_name, chunk in zip(to_field_list, chunks):
                 if squeeze:
                     chunk = chunk.squeeze(dim)
-                field_dict[target_field_name] = Field(chunk, op)
+                new_fields[target_field_name] = Field(chunk, op)
 
             decoding_update[field_name].append({
                 "combine": {
-                    "from_field_list": op.out_field,
+                    "from_field_list": to_field_list,
                     "method": "stack" if split_size_or_sections == 1 else "concat",
                     "dim": dim,
                 }
@@ -326,15 +338,16 @@ def process_field(  # noqa: C901
             "split": {
                 "split_size_or_sections": split_size_or_sections,
                 "dim": dim,
+                "to_fields_with_prefix": to_fields_with_prefix,
             }
-        } if isinstance(op.out_field, str):
+        }:
             chunks = field_data.split(split_size_or_sections, dim)
             for i, chunk in enumerate(chunks):
-                field_dict[f"{op.out_field}{i}"] = Field(chunk.squeeze(dim), op)
+                new_fields[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim), op)
 
             decoding_update[field_name].append({
                 "combine": {
-                    "from_fields_with_prefix": op.out_field,
+                    "from_fields_with_prefix": to_fields_with_prefix,
                     "method": "stack" if split_size_or_sections == 1 else "concat",
                     "dim": dim,
                 }
@@ -437,7 +450,7 @@ def process_field(  # noqa: C901
                 case _:
                     raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
 
-        case {"split_bytes": {"num_bytes": num_bytes}}:
+        case {"split_bytes": {"num_bytes": num_bytes, "to_fields_with_prefix": to_fields_with_prefix}}:
             num_bytes = int(num_bytes)
 
             if num_bytes < 2 or num_bytes > 8:
@@ -452,9 +465,9 @@ def process_field(  # noqa: C901
 
             for i in range(num_bytes):
                 mask = (field_data >> (i * 8)) & 0xFF
-                res_field_name = f"{op.out_field}{i}"
+                res_field_name = f"{to_fields_with_prefix}{i}"
                 res_field_names.append(res_field_name)
-                field_dict[res_field_name] = Field(mask.to(torch.uint8), op)
+                new_fields[res_field_name] = Field(mask.to(torch.uint8), op)
 
             decoding_update[field_name].append({
                 "combine": {
@@ -463,65 +476,28 @@ def process_field(  # noqa: C901
                 }
             })
         case {"reindex": {"src_field": src_field_name, "index_field": index_field_name}}:
-            index_field_obj = field_dict[index_field_name]
+            index_field_obj = op.input_fields[index_field_name]
             if len(index_field_obj.data.shape) != 2:
                 raise ValueError("Expecting grid for re-index operation")
             decoding_update[src_field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
-            original_data = field_dict[src_field_name].data
-            field_dict[src_field_name] = Field(original_data[index_field_obj.data], op)
+            original_data = op.input_fields[src_field_name].data
+            new_fields[src_field_name] = Field(original_data[index_field_obj.data], op)
 
         case {"plas": plas_cfg_dict} if isinstance(plas_cfg_dict, dict):
             sorted_indices = plas_preprocess(
                 plas_cfg=PLASConfig(**plas_cfg_dict),
-                fields=field_dict,
+                fields=op.input_fields,
                 verbose=verbose,
             )
-            field_dict[op.out_field[0]] = Field(sorted_indices, op)
+            new_fields[plas_cfg_dict["to_field"]] = Field(sorted_indices, op)
 
         case _:
             raise ValueError(f"Unsupported field operation: {field_op}")
 
-    # if we processed the field_data we need to update the field_dict
+    # if we processed the field_data we need to update the new_fields
     if field_data is not None:
         new_field = Field(field_data, op)
-        field_dict[field_name] = new_field
-
-    # do we need to return field_dict? it should be a reference and updated in place
-    # same for decoding_update
-
-
-@lru_cache
-def process_operation(op: Operation, verbose: bool) -> dict[str, Field]:
-    """Process the operation and update the fields."""
-
-    print("applying operation without using cache")
-
-    field_dict = op.input_fields.copy()
-    decoding_update = defaultdict(list)
-    for params in op.params:
-        process_field(op, params, field_dict, decoding_update, verbose=verbose)
-
-    # op.out_field can be a string or a list. if it is a string return all elements of field_dict where the keys start with the string
-    # if it is a list with one element return the element with the name. if it does not exist it should only have one element, which will be renamed
-    # if it is a list with more than one element return the elements with those keys.
-    new_fields = {}
-    if isinstance(op.out_field, str):
-        for key in field_dict:
-            if key.startswith(op.out_field):
-                new_fields[key] = field_dict[key]
-    elif isinstance(op.out_field, list):
-        if len(op.out_field) == 1 and op.out_field[0] in field_dict:
-            new_fields[op.out_field[0]] = field_dict[op.out_field[0]]
-        elif len(op.out_field) == 1 and op.out_field[0] not in field_dict:
-            new_fields[op.out_field[0]] = field_dict[next(iter(field_dict))]
-
-            decoding_update[next(iter(field_dict))].append({"from_field": op.out_field[0]})
-        else:
-            for key in op.out_field:
-                if key in field_dict:
-                    new_fields[key] = field_dict[key]
-                else:
-                    raise ValueError(f"Field '{key}' not found in input fields.")
+        new_fields[field_name] = new_field
 
     return new_fields, decoding_update
 
@@ -547,29 +523,20 @@ class SceneEncoder:
 
     def _encode_fields(self, verbose: bool) -> None:
         """Process the fields according to the operations defined in the encoding parameters."""
+        # this loops over every block in the encoding config
         for op_params in self.encoding_params.ops:
-            # build the operation
-            # TODO: should we have a from_dict method for Operation?
-            input_fields = {}
-            for field_name in op_params["input_fields"]:
-                if field_name not in self.fields:
-                    raise ValueError(f"Field '{field_name}' not found in input fields.")
-                input_fields[field_name] = self.fields[field_name]
-            # TODO: how to handle output fields?
-            if "out_fields" in op_params:
-                output = op_params["out_fields"]
-            elif "out_field_prefix" in op_params:
-                output = op_params["out_field_prefix"]
-            else:
-                raise ValueError("No output field(s) specified in operation parameters.")
-
-            op = Operation(input_fields, op_params["ops"], output)
-
-            # process the operations
-            new_fields, decoding_update = process_operation(op, verbose=verbose)
-            for key, op_list in decoding_update.items():
-                self.decoding_params.fields[key].extend(op_list)
-            self.fields.update(new_fields)
+            # build each operation and process it
+            for op_param in op_params["ops"]:
+                input_fields = {}
+                for field_name in op_params["input_fields"]:
+                    if field_name not in self.fields:
+                        raise ValueError(f"Field '{field_name}' not found in input fields.")
+                    input_fields[field_name] = self.fields[field_name]
+                op = Operation(input_fields, op_param)
+                new_fields, decoding_update = process_operation(op, verbose=verbose)
+                for key, op_list in decoding_update.items():
+                    self.decoding_params.fields[key].extend(op_list)
+                self.fields.update(new_fields)
 
     def _write_files(self) -> None:
         for file in self.encoding_params.files:
@@ -637,10 +604,6 @@ class SceneEncoder:
     def encode(self, verbose: bool) -> None:
         # container as folder for now
         self.output_path.mkdir(parents=True, exist_ok=True)
-
-        # empty base field for PLAS, which picks several input fields
-        # TODO review design
-        self.fields["_"] = Field.from_name(torch.empty(0), "_")
 
         self._encode_fields(verbose=verbose)
 
