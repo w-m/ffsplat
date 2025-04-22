@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 class Operation:
     input_fields: dict[str, "Field"]
     params: dict[str, Any]
-    out_field: str | list[str]
 
     def __hash__(self) -> int:
         json_str = json.dumps(self.to_json())
@@ -25,5 +24,4 @@ class Operation:
         return {
             "input_fields": {name: field.to_json() for name, field in self.input_fields.items()},
             "params": self.params,
-            "out_field": self.out_field,
         }
