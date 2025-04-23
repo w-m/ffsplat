@@ -1,19 +1,20 @@
 import json
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import Tensor
 
-from ..models.operations import Operation
+if TYPE_CHECKING:
+    from ..models.operations import Operation
 
 
 class Field:
     data: Tensor
-    op: Operation
+    op: "Operation"
 
-    def __init__(self, data: Tensor, op: Operation) -> None:
+    def __init__(self, data: Tensor, op: "Operation") -> None:
         self.data = data
         self.op = op
 
@@ -29,19 +30,23 @@ class Field:
     def from_file(cls, data: Tensor, file_path: Path) -> "Field":
         """Create a field from a file instead of a operation"""
 
+        from ..models.operations import Operation
+
         # TODO: set out_field
         op = Operation(
             input_fields={},
-            params={"from file": file_path, "last modified": file_path.stat().st_mtime},
+            params={"from": {"file": file_path, "last modified": file_path.stat().st_mtime}},
         )
         return cls(data, op)
 
     @classmethod
     def from_name(cls, data: Tensor, name: str) -> "Field":
         """This function should not be used. It is only temporarily used until the decoder is refactored"""
+        from ..models.operations import Operation
+
         op = Operation(
             input_fields={},
-            params={"name": name},
+            params={"from": {"name": name}},
         )
         return cls(data, op)
 

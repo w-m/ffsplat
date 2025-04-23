@@ -147,7 +147,7 @@ def process_operation(
 ) -> tuple[dict[str, Field], defaultdict[str, list]]:
     """Process the operation and return the new fields and decoding updates."""
     print("Cache miss")
-    return op.apply()
+    return op.apply(verbose=verbose)
 
 
 @dataclass
