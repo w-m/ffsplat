@@ -50,8 +50,8 @@ class Transformation(ABC):
     @staticmethod
     @abstractmethod
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         pass
 
 
@@ -59,8 +59,8 @@ class Cluster(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         # Implement the clustering logic here
         input_fields = parentOp.input_fields
 
@@ -96,8 +96,8 @@ class Split(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -153,15 +153,15 @@ class Remapping(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: defaultdict[str, list] = defaultdict(list)
         match params:
             case {"method": "log"}:
                 decoding_update[field_name].append({"remapping": {"method": "exp"}})
@@ -229,7 +229,9 @@ class Remapping(Transformation):
 class ToField(Transformation):
     @staticmethod
     @override
-    def apply(params: str, parentOp: "Operation", verbose=False) -> tuple[dict[str, Field], defaultdict[str, list]]:
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -237,10 +239,13 @@ class ToField(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update = defaultdict(list)
+        match params:
+            case {"to_field_name": to_field_name}:
+                decoding_update[field_name].append({"from_field": to_field_name})
+                new_fields[to_field_name] = Field(field_data, parentOp)
+            case _:
+                raise ValueError(f"Unknown ToField parameters: {params}")
 
-        to_field = params
-        decoding_update[field_name].append({"from_field": to_field})
-        new_fields[to_field] = Field(field_data, parentOp)
         return new_fields, decoding_update
 
 
@@ -248,8 +253,8 @@ class Flatten(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -273,8 +278,8 @@ class Reshape(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -296,8 +301,8 @@ class Permute(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -320,8 +325,8 @@ class ToDType(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -372,8 +377,8 @@ class SplitBytes(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -419,8 +424,8 @@ class Reindex(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
 
         new_fields: dict[str, Field] = {}
@@ -473,7 +478,7 @@ class PLAS(Transformation):
         return sorted_keep_indices
 
     @staticmethod
-    def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str:Field], verbose: bool) -> Tensor:
+    def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Field], verbose: bool) -> Tensor:
         primitive_filter = PLAS.primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by].data, verbose)
 
         # TODO untested
@@ -531,10 +536,10 @@ class PLAS(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose=False
-    ) -> tuple[dict[str, Field], defaultdict[str, list]]:
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 
         plas_cfg_dict = params
         if isinstance(plas_cfg_dict, dict):

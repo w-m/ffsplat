@@ -3,25 +3,36 @@ from collections import defaultdict
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
-import ffsplat.models.transformations as transformations
-
-from ..models.transformations import Transformation
+from ..models.transformations import (
+    PLAS,
+    Cluster,
+    Flatten,
+    Permute,
+    Reindex,
+    Remapping,
+    Reshape,
+    Split,
+    SplitBytes,
+    ToDType,
+    ToField,
+    Transformation,
+)
 
 if TYPE_CHECKING:
     from ..models.fields import Field
 
 transformation_map = {
-    "cluster": transformations.Cluster,
-    "split": transformations.Split,
-    "flatten": transformations.Flatten,
-    "reshape": transformations.Reshape,
-    "remapping": transformations.Remapping,
-    "to_field": transformations.ToField,
-    "permute": transformations.Permute,
-    "to_dtype": transformations.ToDType,
-    "split_bytes": transformations.SplitBytes,
-    "reindex": transformations.Reindex,
-    "plas": transformations.PLAS,
+    "cluster": Cluster,
+    "split": Split,
+    "flatten": Flatten,
+    "reshape": Reshape,
+    "remapping": Remapping,
+    "to_field": ToField,
+    "permute": Permute,
+    "to_dtype": ToDType,
+    "split_bytes": SplitBytes,
+    "reindex": Reindex,
+    "plas": PLAS,
 }
 
 

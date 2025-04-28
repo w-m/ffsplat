@@ -72,7 +72,8 @@ ops:
     ops:
       - remapping:
           method: inverse-sigmoid
-      - to_field: point_cloud.ply@opacity
+      - to_field:
+          to_field_name: point_cloud.ply@opacity
 
 files:
   - from_fields_with_prefix: point_cloud.ply@
