@@ -10,50 +10,57 @@ scene:
     - quaternions
     - sh
 
-fields:
-  sh:
-    - split:
-        to_field_list: [f_dc]
-        split_size_or_sections: [1]
-        dim: 1
-        squeeze: false
+ops:
+  - input_fields: [sh]
+    ops:
+      - split:
+          split_size_or_sections: [1]
+          dim: 1
+          squeeze: false
+          to_field_list: [f_dc]
 
-  f_dc:
-    - flatten:
-        start_dim: 1
-    - split:
-        to_fields_with_prefix: point_cloud.ply@f_dc_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [f_dc]
+    ops:
+      - flatten:
+          start_dim: 1
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+          to_fields_with_prefix: point_cloud.ply@f_dc_
 
-  quaternions:
-    - split:
-        to_fields_with_prefix: point_cloud.ply@rot_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [quaternions]
+    ops:
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+          to_fields_with_prefix: point_cloud.ply@rot_
 
-  means:
-    - split:
-        to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [means]
+    ops:
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+          to_field_list:
+            [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
 
-  scales:
-    - remapping:
-        method: log
-    - split:
-        to_fields_with_prefix: point_cloud.ply@scale_
-        split_size_or_sections: 1
-        dim: 1
-        squeeze: true
+  - input_fields: [scales]
+    ops:
+      - remapping:
+          method: log
+      - split:
+          split_size_or_sections: 1
+          dim: 1
+          squeeze: true
+          to_fields_with_prefix: point_cloud.ply@scale_
 
-  opacities:
-    - remapping:
-        method: inverse-sigmoid
-    - to_field: point_cloud.ply@opacity
+  - input_fields: [opacities]
+    ops:
+      - remapping:
+          method: inverse-sigmoid
+      - to_field: point_cloud.ply@opacity
 
 files:
   - from_fields_with_prefix: point_cloud.ply@

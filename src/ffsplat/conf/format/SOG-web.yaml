@@ -11,143 +11,186 @@ scene:
     - sh
 
 fields:
-  sh:
-    - split:
-        to_field_list: [f_dc, f_rest]
-        split_size_or_sections: [1, 15]
-        dim: 1
-        squeeze: false
+  - input_fields: [sh]
+    ops:
+      - split:
+          to_field_list: [f_dc, f_rest]
+          split_size_or_sections: [1, 15]
+          dim: 1
+          squeeze: false
 
-  means:
-    - remapping:
-        method: signed-log
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 65535
-        dim: 2
-    - to_dtype:
-        dtype: uint16
-        round_to_int: true
-    - split_bytes:
-        to_fields_with_prefix: means_bytes_
-        num_bytes: 2
+  - input_fields: [means]
+    ops:
+      - remapping:
+          method: signed-log
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 65535
+          dim: 2
+      - to_dtype:
+          dtype: uint16
+          round_to_int: true
+      - split_bytes:
+          to_fields_with_prefix: means_bytes_
+          num_bytes: 2
 
-  _:
-    - plas:
-        prune_by: opacities
-        scaling_fn: standardize
-        # activated: true
-        shuffle: true
-        improvement_break: 1e-4
-        # improvement_break: 0.1
-        weights:
-          means_bytes_0: 0.1
-          means_bytes_1: 1.0
-          f_dc: 1.0
-          f_rest: 0.0
-          opacities: 0.0
-          scales: 1.0
-          quaternions: 0.0
-    - to_tmp_field: sorted_indices
+  - input_fields:
+      [
+        means_bytes_0,
+        means_bytes_1,
+        f_dc,
+        f_rest,
+        opacities,
+        scales,
+        quaternions,
+      ]
+    ops:
+      - plas:
+          prune_by: opacities
+          scaling_fn: standardize
+          # activated: true
+          shuffle: true
+          improvement_break: 1e-4
+          # improvement_break: 0.1
+          to_field: sorted_indices
+          weights:
+            means_bytes_0: 0.1
+            means_bytes_1: 1.0
+            f_dc: 1.0
+            f_rest: 0.0
+            opacities: 0.0
+            scales: 1.0
+            quaternions: 0.0
 
-  means_bytes_0:
-    - reindex:
-        index_field: sorted_indices
+  - input_fields: [means_bytes_0, sorted_indices]
+    ops:
+      - reindex:
+          src_field: means_bytes_0
+          index_field: sorted_indices
 
-  means_bytes_1:
-    - reindex:
-        index_field: sorted_indices
+  - input_fields: [means_bytes_1, sorted_indices]
+    ops:
+      - reindex:
+          src_field: means_bytes_1
+          index_field: sorted_indices
 
-  f_dc:
-    - flatten:
-        start_dim: 1
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: channelwise-minmax
-        min: 0.0
-        max: 255.0
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [f_dc]
+    ops:
+      - flatten:
+          start_dim: 1
+      - remapping:
+          method: channelwise-minmax
+          min: 0.0
+          max: 255.0
+          dim: 1
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
 
-  f_rest:
-    - permute:
-        dims: [0, 2, 1]
-    - flatten:
-        start_dim: 1
-    - cluster:
-        method: kmeans
-        num_clusters: 4096
-        distance: euclidean
-        to_fields_with_prefix: f_rest_
+  - input_fields: [f_dc, sorted_indices]
+    ops:
+      - reindex:
+          src_field: f_dc
+          index_field: sorted_indices
 
-  f_rest_labels:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 65535
-        dim: 2
-    - to_dtype:
-        dtype: uint16
-        round_to_int: true
-    - split_bytes:
-        to_fields_with_prefix: f_rest_labels_bytes_
-        num_bytes: 2
+  - input_fields: [f_rest]
+    ops:
+      - permute:
+          dims: [0, 2, 1]
+      - flatten:
+          start_dim: 1
+      - cluster:
+          method: kmeans
+          num_clusters: 4096
+          distance: euclidean
+          to_fields_with_prefix: f_rest_
 
-  f_rest_centroids:
-    - remapping:
-        method: channelwise-minmax
-        min: 0.0
-        max: 255.0
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [f_rest_labels, sorted_indices]
+    ops:
+      - reindex:
+          src_field: f_rest_labels
+          index_field: sorted_indices
 
-  quaternions:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 63
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [f_rest_labels]
+    ops:
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 65535
+          dim: 2
+      - to_dtype:
+          dtype: uint16
+          round_to_int: true
+      - split_bytes:
+          to_fields_with_prefix: f_rest_labels_bytes_
+          num_bytes: 2
 
-  scales:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: log
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 63
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [f_rest_centroids]
+    ops:
+      - remapping:
+          method: channelwise-minmax
+          min: 0.0
+          max: 255.0
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
 
-  opacities:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: inverse-sigmoid
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 63
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [quaternions, sorted_indices]
+    ops:
+      - reindex:
+          src_field: quaternions
+          index_field: sorted_indices
+
+  - input_fields: [quaternions]
+    ops:
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 63
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [scales, sorted_indices]
+    ops:
+      - reindex:
+          src_field: scales
+          index_field: sorted_indices
+
+  - input_fields: [scales]
+    ops:
+      - remapping:
+          method: log
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 63
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities, sorted_indices]
+    ops:
+      - reindex:
+          src_field: opacities
+          index_field: sorted_indices
+
+  - input_fields: [opacities]
+    ops:
+      - remapping:
+          method: inverse-sigmoid
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 63
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
 
 files:
   - from_field: opacities
