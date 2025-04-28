@@ -1,0 +1,61 @@
+profile: 3DGS-INRIA.ply
+profile_version: 0.1
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+fields:
+  sh:
+    - split:
+        to_field_list: [f_dc]
+        split_size_or_sections: [1]
+        dim: 1
+        squeeze: false
+
+  f_dc:
+    - flatten:
+        start_dim: 1
+    - split:
+        to_fields_with_prefix: point_cloud.ply@f_dc_
+        split_size_or_sections: 1
+        dim: 1
+        squeeze: true
+
+  quaternions:
+    - split:
+        to_fields_with_prefix: point_cloud.ply@rot_
+        split_size_or_sections: 1
+        dim: 1
+        squeeze: true
+
+  means:
+    - split:
+        to_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+        split_size_or_sections: 1
+        dim: 1
+        squeeze: true
+
+  scales:
+    - remapping:
+        method: log
+    - split:
+        to_fields_with_prefix: point_cloud.ply@scale_
+        split_size_or_sections: 1
+        dim: 1
+        squeeze: true
+
+  opacities:
+    - remapping:
+        method: inverse-sigmoid
+    - to_field: point_cloud.ply@opacity
+
+files:
+  - from_fields_with_prefix: point_cloud.ply@
+    type: ply
+    file_path: point_cloud.ply

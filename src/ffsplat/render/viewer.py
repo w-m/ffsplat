@@ -13,6 +13,8 @@ from jaxtyping import Float32, UInt8
 
 from ._renderer import Renderer, RenderTask
 
+available_output_format: list[str] = ["3DGS_INRIA_ply", "SOG-web"]
+
 
 @dataclasses.dataclass
 class CameraState:
@@ -86,6 +88,8 @@ class Viewer:
         self.state = ViewerState()
         if self.mode == "rendering":
             self.state.status = "rendering"
+        self.convert_gui_handles: list = []
+        self.load_buttons: list = []
 
         # Private states.
         self._renderers: dict[int, Renderer] = {}
@@ -99,6 +103,8 @@ class Viewer:
         self._define_guis()
 
     def _define_guis(self):
+        self.server.gui.configure_theme(control_width="large", control_layout="fixed")
+        self.scene_label = self.server.gui.add_markdown("Showing scene: None")
         with self.server.gui.add_folder("Stats", visible=self.mode == "training") as self._stats_folder:
             self._stats_text_fn = (
                 lambda: f"""<sub>
@@ -127,6 +133,45 @@ class Viewer:
                 "Max Img Res", min=64, max=2048, step=1, initial_value=2048
             )
             self._max_img_res_slider.on_update(self.rerender)
+            self.render_quality_dropdown = self.server.gui.add_dropdown(
+                "Render Format:", ["png", "jpeg"], initial_value="jpeg"
+            )
+            self.render_quality_dropdown.on_update(self.rerender)
+        self.tab_group = self.server.gui.add_tab_group()
+        self.scenes_folder = self.tab_group.add_tab("Scenes")
+
+    def add_eval(self, eval_fn: Callable):
+        with self.tab_group.add_tab("Evaluation") as self.eval_folder:
+            self.eval_button = self.server.gui.add_button("Run evaluation")
+            self.eval_button.on_click(eval_fn)
+            self.eval_info = self.server.gui.add_markdown("")
+            self.eval_info.visible = False
+            self.eval_progress = self.server.gui.add_progress_bar(0.0)
+            self.eval_progress.visible = False
+            self.eval_table = self.server.gui.add_html("")
+
+    def add_convert(self, build_convert_options_fn: Callable, convert_fn: Callable):
+        with self.tab_group.add_tab("Convert") as self.convert_folder:
+            self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
+            self._output_dropdown.on_update(build_convert_options_fn)
+            self._convert_button = self.server.gui.add_button("Convert")
+            self._convert_button.on_click(convert_fn)
+        build_convert_options_fn(None)
+
+    def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable):
+        with self.scenes_folder, self.server.gui.add_folder(f"Scene {scene_id}"):
+            self.server.gui.add_markdown(description)
+            load_button = self.server.gui.add_button("Load")
+            load_button.on_click(lambda _: load_fn(scene_id))
+            save_button = self.server.gui.add_button("Save")
+            save_button.on_click(lambda _: save_fn(scene_id))
+            self.load_buttons.append(load_button)
+
+    def add_test_functionality(self, test_fn: Callable):
+        with self.server.gui.add_folder("Test") as self.test_folder:
+            self._test_button = self.server.gui.add_button("Run test")
+            self._test_button.on_click(test_fn)
+            self._test_button.on_click(self.rerender)
 
     def _toggle_train_buttons(self, _):
         self._pause_train_button.visible = not self._pause_train_button.visible

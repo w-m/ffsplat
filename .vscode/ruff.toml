@@ -1,0 +1,3 @@
+[lint]
+run = "onType"
+# Mirror settings from pyproject.toml for VSCode-specific configuration

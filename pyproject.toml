@@ -5,45 +5,72 @@ description = "A conversion tool for splatting scenes."
 authors = [{ name = "Wieland Morgenstern", email = "wieland.morgenstern@hhi.fraunhofer.de" }]
 readme = "README.md"
 keywords = ['python']
-requires-python = ">=3.9,<4.0"
+requires-python = ">=3.11,<4.0"
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "gsplat>=1.4.0",
-    "torch>=2.6.0",
-    "viser>=0.2.23",
-    "jaxtyping>=0.2.25",
-    "numpy>=1.24.0",
-    "plyfile>=1.0.0"
+    "gsplat>=1.4.0,<2.0.0",
+    "torch>=2.6.0,<3.0.0",
+    "jaxtyping>=0.2.25,<0.3.0",
+    "numpy>=2.0.0,<3.0.0",
+    "plyfile>=1.1.0,<2.0.0",
+    # "hydra-core>=1.3.0,<2.0.0",
+    "jsonargparse>=4.37.0,<5.0.0",
+    # TODO imagecodecs version > 2023.9.18 produce much larger JPEG XL files: https://github.com/fraunhoferhhi/Self-Organizing-Gaussians/issues/3
+    # but for numpy > 2, we require a modern imagecodecs
+    # "imagecodecs[all]>=2024.12.30",
+    "PyYAML>=6.0.2,<7.0.0",
+    "opencv-python>=4.11.0.86,<5.0.0.0",
+    "pillow>=11.1.0,<12.0.0",
+    "pillow-heif>=0.22.0,<1.0.0",
+    "tqdm>=4.67.1,<5.0.0",
+    "torchmetrics>=1.6.1,<2.0.0",
+    "torchpq>=0.3.0.6,<0.4.0", # kmeans clustering
+    "cupy>=13.4.1,<14.0.0", # torchpq dependency
+    # "torchvision>=0.21.0,<1.0.0",
+    "camorph",
+    "plas",
+    "viser",
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu118"
-url = "https://download.pytorch.org/whl/cu118"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 torchvision = [
-  { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+camorph = { git = "https://github.com/fbranschke/camorph.git" }
+plas = { git = "https://github.com/fraunhoferhhi/PLAS.git" }
+# newest release does not support html elements. Use a commit that does. This can be changed with the next release.
+viser = { git = "https://github.com/nerfstudio-project/viser.git" , rev = "0cb94054b29028a012aeeba11b00a5477b09a2fa"}
 
 
 [project.urls]
 Homepage = "https://w-m.github.io/ffsplat/"
 Repository = "https://github.com/w-m/ffsplat"
 Documentation = "https://w-m.github.io/ffsplat/"
+
+[project.scripts]
+ffsplat-convert = "ffsplat.cli.convert:main"
+ffsplat-view = "ffsplat.cli.view:main"
+# ffsplat-probe = "ffsplat.cli.probe:main"
+# ffsplat-live = "ffsplat.cli.live:main"
+# ffsplat-eval = "ffsplat.cli.eval:main"
+# ffsplat-opt = "ffsplat.cli.opt:main"
+
 
 [dependency-groups]
 dev = [
@@ -57,6 +84,7 @@ dev = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
+    "types-pyyaml>=6.0.12.20250326",
 ]
 
 [build-system]
@@ -65,7 +93,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.mypy]
 files = ["src"]
-exclude = ["src/view/.*"]
+exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -125,7 +153,9 @@ ignore = [
     # DoNotAssignLambda
     "E731",
     # Syntax error in forward annotation, required for jaxtyping (https://docs.kidger.site/jaxtyping/faq/)
-    "F722"
+    "F722",
+    # Checks for long exception messages that are not defined in the exception class itself, doesn't allow `ValueError("message")`
+    "TRY003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -133,3 +163,7 @@ ignore = [
 
 [tool.ruff.format]
 preview = true
+
+[tool.deptry.per_rule_ignores]
+# cupy required for kmeans in torchpq, but we don't import it explicitly in the code base
+DEP002 = ["cupy"]

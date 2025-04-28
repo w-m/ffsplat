@@ -1,0 +1,77 @@
+container_identifier: smurfx
+container_version: 0.1
+
+# this is a template file for .ply files without any metadata
+packer: unknown
+
+profile: 3DGS-INRIA.ply
+profile_version: 0.1
+
+meta:
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+files:
+  - file_path: "/placeholder/path/to/your/3dgs_inria_ply_file.ply"
+    type: ply
+    field_prefix: point_cloud.ply@
+
+fields:
+  f_dc:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@f_dc_
+        method: stack
+        dim: 1
+    - reshape_from_dim:
+        start_dim: 1
+        shape: [1, 3]
+
+  f_rest:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@f_rest_
+        method: stack
+        dim: 1
+    - reshape_from_dim:
+        start_dim: 1
+        shape: [3, 15]
+    - permute:
+        dims: [0, 2, 1]
+
+  sh:
+    - combine:
+        from_field_list: [f_dc, f_rest]
+        method: concat
+        dim: 1
+
+  quaternions:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@rot_
+        method: stack
+        dim: 1
+
+  means:
+    - combine:
+        from_field_list:
+          [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+        method: stack
+        dim: 1
+
+  scales:
+    - combine:
+        from_fields_with_prefix: point_cloud.ply@scale_
+        method: stack
+        dim: 1
+    - remapping:
+        method: exp
+
+  opacities:
+    - from_field: point_cloud.ply@opacity
+    - remapping:
+        method: sigmoid

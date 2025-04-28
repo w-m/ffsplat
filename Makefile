@@ -2,6 +2,8 @@
 install: ## Install the virtual environment and install the pre-commit hooks
 	@echo "🚀 Creating virtual environment using uv"
 	@uv sync
+	@echo "🚀 Installing package in editable mode"
+	@uv pip install -e .
 	@uv run pre-commit install
 
 .PHONY: check
@@ -29,6 +31,19 @@ build: clean-build ## Build wheel file
 clean-build: ## Clean build artifacts
 	@echo "🚀 Removing build artifacts"
 	@uv run python -c "import shutil; import os; shutil.rmtree('dist') if os.path.exists('dist') else None"
+
+.PHONY: clean-all
+clean-all: clean-build ## Clean everything - build artifacts, cache files, venv, and lock file
+	@echo "🚀 Removing all build and runtime artifacts"
+	@find . -type d -name "__pycache__" -exec rm -rf {} +
+	@find . -type d -name "*.egg-info" -exec rm -rf {} +
+	@rm -rf .venv
+	@rm -f uv.lock
+	@echo "🧹 Cleaned all artifacts"
+
+.PHONY: clean-install
+clean-install: clean-all install ## Clean everything and reinstall
+	@echo "✨ Fresh install completed"
 
 .PHONY: publish
 publish: ## Publish a release to PyPI.
