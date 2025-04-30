@@ -16,7 +16,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "gsplat>=1.4.0,<2.0.0",
+    "gsplat>=1.4.0,<1.5.0",
     "torch>=2.6.0,<3.0.0",
     "jaxtyping>=0.2.25,<0.3.0",
     "numpy>=2.0.0,<3.0.0",
@@ -33,8 +33,8 @@ dependencies = [
     "tqdm>=4.67.1,<5.0.0",
     "torchmetrics>=1.6.1,<2.0.0",
     "torchpq>=0.3.0.6,<0.4.0", # kmeans clustering
+    "torchvision>=0.21.0,<1.0.0", # torchmetrics dependency, needs to be installed explicitly to use cuda
     "cupy>=13.4.1,<14.0.0", # torchpq dependency
-    # "torchvision>=0.21.0,<1.0.0",
     "camorph>=0.3.6,<1.0.0",
     "plas",
     "viser",

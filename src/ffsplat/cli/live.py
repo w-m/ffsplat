@@ -321,7 +321,7 @@ class InteractiveConversionTool:
         stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
         stats.update({
             "elapsed_time": elapsed_time,
-            "num_GS": len(self.gaussians.means),
+            "num_GS": len(self.gaussians.means.data),
             "size": size,
         })
         self.scenes[scene_id].scene_metrics = stats
