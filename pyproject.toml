@@ -16,8 +16,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "gsplat>=1.4.0,<1.5.0",
-    "torch>=2.6.0,<3.0.0",
+    "gsplat==1.4.0",
+    "torch==2.6.0",
     "jaxtyping>=0.2.25,<0.3.0",
     "numpy>=2.0.0,<3.0.0",
     "plyfile>=1.1.0,<2.0.0",
