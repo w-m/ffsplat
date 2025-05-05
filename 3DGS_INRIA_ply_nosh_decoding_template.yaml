@@ -23,38 +23,52 @@ files:
     type: ply
     field_prefix: point_cloud.ply@
 
-fields:
-  sh:
-    - combine:
-        from_fields_with_prefix: point_cloud.ply@f_dc_
-        method: stack
-        dim: 1
-    - reshape_from_dim:
-        start_dim: 1
-        shape: [1, 3]
+ops:
+  - input_fields:
+      from_fields_with_prefix: point_cloud.ply@f_dc_
+    transforms:
+      - combine:
+          method: stack
+          dim: 1
+          to_field: sh
 
-  quaternions:
-    - combine:
-        from_fields_with_prefix: point_cloud.ply@rot_
-        method: stack
-        dim: 1
+  - input_fields: [sh]
+    transforms:
+      - reshape:
+          start_dim: 1
+          shape: [1, 3]
 
-  means:
-    - combine:
-        from_field_list:
-          [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
-        method: stack
-        dim: 1
+  - input_fields:
+      from_fields_with_prefix: point_cloud.ply@rot_
+    transforms:
+      - combine:
+          method: stack
+          dim: 1
+          to_field: quaternions
 
-  scales:
-    - combine:
-        from_fields_with_prefix: point_cloud.ply@scale_
-        method: stack
-        dim: 1
-    - remapping:
-        method: exp
+  - input_fields: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+    transforms:
+      - combine:
+          method: stack
+          dim: 1
+          to_field: means
 
-  opacities:
-    - from_field: point_cloud.ply@opacity
-    - remapping:
-        method: sigmoid
+  - input_fields:
+      from_fields_with_prefix: point_cloud.ply@scale_
+    transforms:
+      - combine:
+          method: stack
+          dim: 1
+          to_field: scales
+
+  - input_fields: [scales]
+    transforms:
+      - remapping:
+          method: exp
+
+  - input_fields: [point_cloud.ply@opacity]
+    transforms:
+      - remapping:
+          method: sigmoid
+      - to_field:
+          to_field_name: opacities
