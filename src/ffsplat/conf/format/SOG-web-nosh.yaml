@@ -140,34 +140,48 @@ ops:
           dtype: uint8
           round_to_int: true
 
-files:
-  - from_field: opacities
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 0
-      matrix_coefficients: 0
-  - from_field: scales
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 444
-      matrix_coefficients: 0
-  - from_fields_with_prefix: means_bytes_
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 444
-      matrix_coefficients: 0
-  - from_field: quaternions
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 444
-      matrix_coefficients: 0
-  - from_field: f_dc
-    type: avif
-    coding_params:
-      quality: 100
-      chroma: 420
-      matrix_coefficients: 1
+  - input_fields: [opacities]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 0
+            matrix_coefficients: 0
+
+  - input_fields: [scales]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 444
+            matrix_coefficients: 0
+
+  - input_fields:
+      from_fields_with_prefix: means_bytes_
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 444
+            matrix_coefficients: 0
+
+  - input_fields: [quaternions]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 444
+            matrix_coefficients: 0
+
+  - input_fields: [f_dc]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: 100
+            chroma: 420
+            matrix_coefficients: 1

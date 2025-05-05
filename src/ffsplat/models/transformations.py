@@ -2,17 +2,38 @@ import math
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, override
 
+import cv2
+import numpy as np
 import torch
+from PIL import Image
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
 from torchpq.clustering import KMeans  # type: ignore[import-untyped]
 
+from ..io.ply import decode_ply, encode_ply
 from ..models.fields import Field
 
 if TYPE_CHECKING:
     from ..models.fields import Operation
+
+
+def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
+    match file_type:
+        case "png":
+            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
+        case "avif":
+            Image.fromarray(field_data.cpu().numpy()).save(
+                output_file_path,
+                format="AVIF",
+                quality=coding_params.get("quality", -1),
+                chroma=coding_params.get("chroma", 444),
+                matrix_coefficients=coding_params.get("matrix_coefficients", 0),
+            )
+        case _:
+            raise ValueError(f"Unsupported file type: {file_type}")
 
 
 @dataclass
@@ -672,6 +693,76 @@ class Lookup(Transformation):
         return new_fields, decoding_update
 
 
+class WriteFile(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        match params:
+            case {"type": "ply", "file_path": file_path, "base_path": base_path, "field_prefix": field_prefix}:
+                fields_to_write = {name[len(field_prefix) :]: field for name, field in parentOp.input_fields.items()}
+                decoding_update["TODO"].append({
+                    "file_path": file_path,
+                    "type": "ply",
+                    "field_prefix": field_prefix,
+                })
+
+                output_file_path = Path(base_path) / Path(file_path)
+
+                encode_ply(fields=fields_to_write, path=output_file_path)
+            case {"type": file_type, "coding_params": coding_params, "base_path": base_path}:
+                for field_name, field_obj in parentOp.input_fields.items():
+                    field_data = field_obj.data
+                    file_path = f"{field_name}.{file_type}"
+                    output_file_path = Path(base_path) / Path(file_path)
+                    write_image(
+                        output_file_path,
+                        field_data,
+                        file_type,
+                        coding_params if isinstance(coding_params, dict) else {},
+                    )
+
+                    decoding_update["TODO"].append({
+                        "file_path": file_path,
+                        "type": file_type,
+                        "field_name": field_name,
+                    })
+            case _:
+                raise ValueError(f"Unknown WriteFile parameters: {params}")
+
+        return {}, decoding_update
+
+
+class ReadFile(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+        new_fields: dict[str, Field] = {}
+        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        match params:
+            case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
+                ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
+                new_fields.update(ply_fields)
+            case {"file_path": file_path, "type": file_type, "field_name": field_name}:
+                match file_type:
+                    case "png":
+                        img_field_data = torch.tensor(
+                            cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+                        )
+                    case "avif":
+                        img_field_data = torch.tensor(np.array(Image.open(file_path)))
+
+                new_fields[field_name] = Field.from_file(img_field_data, file_path)
+            case _:
+                raise ValueError(f"Unknown ReadFile parameters: {params}")
+
+        return new_fields, decoding_update
+
+
 transformation_map = {
     "cluster": Cluster,
     "split": Split,
@@ -686,6 +777,8 @@ transformation_map = {
     "plas": PLAS,
     "lookup": Lookup,
     "combine": Combine,
+    "write_file": WriteFile,
+    "read_file": ReadFile,
 }
 
 

@@ -5,14 +5,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import cv2
 import torch
 import yaml
-from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
-from torch import Tensor
 
-from ..io.ply import encode_ply
 from ..models.fields import Field
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
@@ -124,22 +120,6 @@ SerializableDumper.add_representer(list, SerializableDumper.represent_list)
 SerializableDumper.add_multi_representer(object, SerializableDumper.represent_general)
 
 
-def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
-    match file_type:
-        case "png":
-            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
-        case "avif":
-            Image.fromarray(field_data.cpu().numpy()).save(
-                output_file_path,
-                format="AVIF",
-                quality=coding_params.get("quality", -1),
-                chroma=coding_params.get("chroma", 444),
-                matrix_coefficients=coding_params.get("matrix_coefficients", 0),
-            )
-        case _:
-            raise ValueError(f"Unsupported file type: {file_type}")
-
-
 @lru_cache
 def process_operation(
     op: Operation,
@@ -176,74 +156,11 @@ class SceneEncoder:
             # build each operation and process it
             input_fields_params = op_params["input_fields"]
             for transform_param in op_params["transforms"]:
-                op = Operation.from_json(input_fields_params, transform_param, self.fields)
+                op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
                 new_fields, decoding_update = process_operation(op, verbose=verbose)
                 for key, op_list in decoding_update.items():
                     self.decoding_params.fields[key].extend(op_list)
                 self.fields.update(new_fields)
-
-    def _write_files(self) -> None:
-        for file in self.encoding_params.files:
-            match file:
-                case {"from_fields_with_prefix": field_prefix, "type": "ply", "file_path": file_path}:
-                    fields_to_write = {
-                        field_name[len(field_prefix) :]: field_obj
-                        for field_name, field_obj in self.fields.items()
-                        if field_name.startswith(field_prefix)
-                    }
-
-                    self.decoding_params.files.append({
-                        "file_path": file_path,
-                        "type": "ply",
-                        "field_prefix": field_prefix,
-                    })
-
-                    output_file_path = self.output_path / file_path
-
-                    encode_ply(fields=fields_to_write, path=output_file_path)
-                case {"from_field": field_name, "type": file_type, "coding_params": coding_params}:
-                    field_data = self.fields[field_name].data
-                    file_path = f"{field_name}.{file_type}"
-                    output_file_path = self.output_path / file_path
-
-                    self.decoding_params.files.append({
-                        "file_path": file_path,
-                        "type": file_type,
-                        "field_name": field_name,
-                    })
-
-                    write_image(
-                        output_file_path,
-                        field_data,
-                        file_type,
-                        coding_params if isinstance(coding_params, dict) else {},
-                    )
-
-                case {
-                    "from_fields_with_prefix": field_prefix,
-                    "type": file_type,
-                    "coding_params": coding_params,
-                }:
-                    for field_name, field_obj in self.fields.items():
-                        field_data = field_obj.data
-                        if field_name.startswith(field_prefix):
-                            file_path = f"{field_name}.{file_type}"
-                            output_file_path = self.output_path / file_path
-                            write_image(
-                                output_file_path,
-                                field_data,
-                                file_type,
-                                coding_params if isinstance(coding_params, dict) else {},
-                            )
-
-                            self.decoding_params.files.append({
-                                "file_path": file_path,
-                                "type": file_type,
-                                "field_name": field_name,
-                            })
-
-                case _:
-                    raise ValueError(f"Unsupported file format: {file}")
 
     def encode(self, verbose: bool) -> None:
         # container as folder for now
@@ -253,8 +170,6 @@ class SceneEncoder:
 
         if verbose:
             self._print_field_stats()
-
-        self._write_files()
 
         # revert the order of the fields in self.decoding_params to enable straightforward decoding
         self.decoding_params.reverse_fields()

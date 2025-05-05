@@ -19,7 +19,7 @@ def decode_ply(file_path: Path, field_prefix: str) -> dict[str, torch.Tensor]:
 def encode_ply(fields: dict[str, Field], path: Path) -> None:
     dtype_list = [(field_name, "f4") for field_name in fields]
 
-    num_primitives = len(next(iter(fields.values())))
+    num_primitives = len(next(iter(fields.values())).data)
     vertex_data = np.empty(num_primitives, dtype=dtype_list)
 
     for field_name, field in fields.items():

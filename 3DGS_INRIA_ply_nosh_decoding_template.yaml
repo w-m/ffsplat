@@ -18,12 +18,14 @@ scene:
     - quaternions
     - sh
 
-files:
-  - file_path: "/placeholder/path/to/your/3dgs_inria_ply_file.ply"
-    type: ply
-    field_prefix: point_cloud.ply@
-
 ops:
+  - input_fields: []
+    transforms:
+      - read_file:
+          file_path: "/placeholder/path/to/your/3dgs_inria_ply_file.ply"
+          type: ply
+          field_prefix: point_cloud.ply@
+
   - input_fields:
       from_fields_with_prefix: point_cloud.ply@f_dc_
     transforms:

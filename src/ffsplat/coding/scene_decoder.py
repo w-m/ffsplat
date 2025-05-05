@@ -3,14 +3,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import cv2
-import numpy as np
-import torch
 import yaml
-from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 
-from ..io.ply import decode_ply
 from ..models.fields import Field
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
@@ -36,17 +31,20 @@ class DecodingParams:
     @classmethod
     def from_container_folder(cls, folder_path: Path) -> "DecodingParams":
         dec_params = cls.from_yaml_file(folder_path / "container_meta.yaml")
-        for file in dec_params.files:
-            file_path = folder_path / file["file_path"]
-            file["file_path"] = str(file_path)
+        for op_params in dec_params.ops:
+            for transform_params in op_params["transforms"]:
+                if "read_file" in transform_params:
+                    file = transform_params["read_file"]
+                    file["file_path"] = str(folder_path / file["file_path"])
         return dec_params
 
     def with_input_path(self, input_path: Path) -> "DecodingParams":
-        # check that we have a single file only, replace its path with the input path
-        if len(self.files) != 1:
-            raise ValueError("Expected a single file in the YAML template")
+        read_file_params = self.ops[0]["transforms"][0]["read_file"]
+        file_type = read_file_params.get("type", None)
+        if file_type is None or file_type != "ply":
+            raise ValueError("Expected a ply file read as first operation")
 
-        self.files[0]["file_path"] = str(input_path)
+        self.ops[0]["transforms"][0]["read_file"]["file_path"] = str(input_path)
         return self
 
 
@@ -65,26 +63,6 @@ class SceneDecoder:
     decoding_params: DecodingParams
     fields: dict[str, Field] = field(default_factory=dict)
     scene: Gaussians = field(init=False)
-
-    def _decode_files(self) -> None:
-        for file in self.decoding_params.files:
-            match file:
-                case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
-                    ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
-                    self.fields.update(ply_fields)
-                case {"file_path": file_path, "type": file_type, "field_name": field_name}:
-                    match file_type:
-                        case "png":
-                            img_field_data = torch.tensor(
-                                cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-                            )
-                        case "avif":
-                            img_field_data = torch.tensor(np.array(Image.open(file_path)))
-
-                    self.fields[field_name] = Field.from_file(img_field_data, file_path)
-
-                case _:
-                    raise ValueError("Unsupported file format")
 
     def _process_fields(self) -> None:
         for op_params in self.decoding_params.ops:
@@ -119,7 +97,6 @@ class SceneDecoder:
             print(stats)
 
     def decode(self, verbose: bool) -> None:
-        self._decode_files()
         self._process_fields()
         if verbose:
             self._print_field_stats()

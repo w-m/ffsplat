@@ -75,7 +75,9 @@ ops:
       - to_field:
           to_field_name: point_cloud.ply@opacity
 
-files:
-  - from_fields_with_prefix: point_cloud.ply@
-    type: ply
-    file_path: point_cloud.ply
+  - input_fields:
+      from_fields_with_prefix: point_cloud.ply@
+    transforms:
+      - write_file:
+          type: ply
+          file_path: point_cloud.ply
