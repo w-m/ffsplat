@@ -10,9 +10,9 @@ scene:
     - quaternions
     - sh
 
-fields:
+ops:
   - input_fields: [means]
-    ops:
+    transforms:
       - remapping:
           method: signed-log
       - remapping:
@@ -28,7 +28,7 @@ fields:
           to_fields_with_prefix: means_bytes_
 
   - input_fields: [sh]
-    ops:
+    transforms:
       - split:
           split_size_or_sections: [1]
           dim: 1
@@ -37,7 +37,7 @@ fields:
 
   - input_fields:
       [means_bytes_0, means_bytes_1, f_dc, opacities, scales, quaternions]
-    ops:
+    transforms:
       - plas:
           prune_by: opacities
           scaling_fn: standardize
@@ -55,19 +55,19 @@ fields:
             quaternions: 0.0
 
   - input_fields: [means_bytes_0, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: means_bytes_0
           index_field: sorted_indices
 
   - input_fields: [means_bytes_1, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: means_bytes_1
           index_field: sorted_indices
 
   - input_fields: [f_dc]
-    ops:
+    transforms:
       - flatten:
           start_dim: 1
       - remapping:
@@ -80,19 +80,19 @@ fields:
           round_to_int: true
 
   - input_fields: [f_dc, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: f_dc
           index_field: sorted_indices
 
   - input_fields: [quaternions, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: quaternions
           index_field: sorted_indices
 
   - input_fields: [quaternions]
-    ops:
+    transforms:
       - remapping:
           method: channelwise-minmax
           min: 0
@@ -103,13 +103,13 @@ fields:
           round_to_int: true
 
   - input_fields: [scales, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: scales
           index_field: sorted_indices
 
   - input_fields: [scales]
-    ops:
+    transforms:
       - remapping:
           method: log
       - remapping:
@@ -122,13 +122,13 @@ fields:
           round_to_int: true
 
   - input_fields: [opacities, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: opacities
           index_field: sorted_indices
 
   - input_fields: [opacities]
-    ops:
+    transforms:
       - remapping:
           method: inverse-sigmoid
       - remapping:

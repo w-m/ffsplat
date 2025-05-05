@@ -48,6 +48,17 @@ class Operation:
         # get trasformation from params
         self.transform_type = next(iter(params))
 
+    @classmethod
+    def from_json(
+        cls,
+        input_field_param: list[str],
+        transform_param: dict[str, Any],
+        field_data: dict[str, "Field"],
+    ) -> "Operation":
+        input_fields = {name: field_data[name] for name in input_field_param}
+        params = transform_param
+        return cls(input_fields, params)
+
     def __hash__(self) -> int:
         json_str = json.dumps(self.to_json())
         return int(sha256(json_str.encode()).hexdigest(), 16)

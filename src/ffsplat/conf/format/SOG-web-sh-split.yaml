@@ -12,7 +12,7 @@ scene:
 
 ops:
   - input_fields: [sh]
-    ops:
+    transforms:
       - split:
           split_size_or_sections: [1, 15]
           dim: 1
@@ -20,7 +20,7 @@ ops:
           to_field_list: [f_dc, f_rest]
 
   - input_fields: [means]
-    ops:
+    transforms:
       - remapping:
           method: signed-log
       - remapping:
@@ -45,7 +45,7 @@ ops:
         scales,
         quaternions,
       ]
-    ops:
+    transforms:
       - plas:
           prune_by: opacities
           scaling_fn: standardize
@@ -64,19 +64,19 @@ ops:
             quaternions: 0.0
 
   - input_fields: [means_bytes_0, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: means_bytes_0
           index_field: sorted_indices
 
   - input_fields: [means_bytes_1, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: means_bytes_1
           index_field: sorted_indices
 
   - input_fields: [f_dc]
-    ops:
+    transforms:
       - flatten:
           start_dim: 1
       - remapping:
@@ -89,13 +89,13 @@ ops:
           round_to_int: true
 
   - input_fields: [f_dc, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: f_dc
           index_field: sorted_indices
 
   - input_fields: [f_rest]
-    ops:
+    transforms:
       - permute:
           dims: [0, 2, 1]
       - flatten:
@@ -110,13 +110,13 @@ ops:
           round_to_int: true
 
   - input_fields: [f_rest, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: f_rest
           index_field: sorted_indices
 
   - input_fields: [f_rest]
-    ops:
+    transforms:
       - split:
           split_size_or_sections: 3
           dim: 2
@@ -124,7 +124,7 @@ ops:
           to_fields_with_prefix: f_rest_
 
   - input_fields: [quaternions]
-    ops:
+    transforms:
       - remapping:
           method: channelwise-minmax
           min: 0
@@ -135,13 +135,13 @@ ops:
           round_to_int: true
 
   - input_fields: [quaternions, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: quaternions
           index_field: sorted_indices
 
   - input_fields: [scales]
-    ops:
+    transforms:
       - remapping:
           method: log
       - remapping:
@@ -154,13 +154,13 @@ ops:
           round_to_int: true
 
   - input_fields: [scales, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: scales
           index_field: sorted_indices
 
   - input_fields: [opacities]
-    ops:
+    transforms:
       - remapping:
           method: inverse-sigmoid
       - remapping:
@@ -173,7 +173,7 @@ ops:
           round_to_int: true
 
   - input_fields: [opacities, sorted_indices]
-    ops:
+    transforms:
       - reindex:
           src_field: opacities
           index_field: sorted_indices

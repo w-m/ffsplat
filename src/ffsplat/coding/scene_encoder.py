@@ -172,15 +172,14 @@ class SceneEncoder:
     def _encode_fields(self, verbose: bool) -> None:
         """Process the fields according to the operations defined in the encoding parameters."""
         # this loops over every block in the encoding config
+        # Processing operation: {'split': {'split_size_or_sections': [1], 'dim': 1, 'squeeze': False, 'to_field_list': ['f_dc']}}
+        # Input fields: torch.Size([87848, 16, 3])
+        # {'input_fields': {'sh': {'input_fields': {}, 'params': {'from': {'name': 'sh'}}}}, 'params': {'split': {'split_size_or_sections': [1], 'dim': 1, 'squeeze': False, 'to_field_list': ['f_dc']}}}
         for op_params in self.encoding_params.ops:
             # build each operation and process it
-            for op_param in op_params["ops"]:
-                input_fields = {}
-                for field_name in op_params["input_fields"]:
-                    if field_name not in self.fields:
-                        raise ValueError(f"Field '{field_name}' not found in input fields.")
-                    input_fields[field_name] = self.fields[field_name]
-                op = Operation(input_fields, op_param)
+            input_fields_params = op_params["input_fields"]
+            for transform_param in op_params["transforms"]:
+                op = Operation.from_json(input_fields_params, transform_param, self.fields)
                 new_fields, decoding_update = process_operation(op, verbose=verbose)
                 for key, op_list in decoding_update.items():
                     self.decoding_params.fields[key].extend(op_list)

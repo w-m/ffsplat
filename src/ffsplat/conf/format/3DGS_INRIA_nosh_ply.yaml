@@ -12,7 +12,7 @@ scene:
 
 ops:
   - input_fields: [sh]
-    ops:
+    transforms:
       - split:
           split_size_or_sections: [1]
           dim: 1
@@ -20,7 +20,7 @@ ops:
           to_field_list: [f_dc]
 
   - input_fields: [f_dc]
-    ops:
+    transforms:
       - flatten:
           start_dim: 1
       - split:
@@ -30,7 +30,7 @@ ops:
           to_fields_with_prefix: point_cloud.ply@f_dc_
 
   - input_fields: [quaternions]
-    ops:
+    transforms:
       - split:
           split_size_or_sections: 1
           dim: 1
@@ -38,7 +38,7 @@ ops:
           to_fields_with_prefix: point_cloud.ply@rot_
 
   - input_fields: [means]
-    ops:
+    transforms:
       - split:
           split_size_or_sections: 1
           dim: 1
@@ -47,7 +47,7 @@ ops:
             [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
 
   - input_fields: [scales]
-    ops:
+    transforms:
       - remapping:
           method: log
       - split:
@@ -57,7 +57,7 @@ ops:
           to_fields_with_prefix: point_cloud.ply@scale_
 
   - input_fields: [opacities]
-    ops:
+    transforms:
       - remapping:
           method: inverse-sigmoid
       - to_field:
