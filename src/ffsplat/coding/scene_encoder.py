@@ -172,9 +172,6 @@ class SceneEncoder:
     def _encode_fields(self, verbose: bool) -> None:
         """Process the fields according to the operations defined in the encoding parameters."""
         # this loops over every block in the encoding config
-        # Processing operation: {'split': {'split_size_or_sections': [1], 'dim': 1, 'squeeze': False, 'to_field_list': ['f_dc']}}
-        # Input fields: torch.Size([87848, 16, 3])
-        # {'input_fields': {'sh': {'input_fields': {}, 'params': {'from': {'name': 'sh'}}}}, 'params': {'split': {'split_size_or_sections': [1], 'dim': 1, 'squeeze': False, 'to_field_list': ['f_dc']}}}
         for op_params in self.encoding_params.ops:
             # build each operation and process it
             input_fields_params = op_params["input_fields"]
@@ -190,7 +187,7 @@ class SceneEncoder:
             match file:
                 case {"from_fields_with_prefix": field_prefix, "type": "ply", "file_path": file_path}:
                     fields_to_write = {
-                        field_name[len(field_prefix) :]: field_obj.data
+                        field_name[len(field_prefix) :]: field_obj
                         for field_name, field_obj in self.fields.items()
                         if field_name.startswith(field_prefix)
                     }

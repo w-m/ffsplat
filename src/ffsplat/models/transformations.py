@@ -52,6 +52,8 @@ class Transformation(ABC):
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
     ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+        """Apply the transformation to the input fields. returns new/updated fields and decoding updates.
+        Transformations that are only available for decoding do return empty decoding updates"""
         pass
 
 
@@ -83,8 +85,9 @@ class Cluster(Transformation):
                 new_fields[f"{to_fields_with_prefix}centroids"] = Field(centroids, parentOp)
                 decoding_update[field_name].append({
                     "lookup": {
-                        "from_field": f"{to_fields_with_prefix}labels",
-                        "to_field": f"{to_fields_with_prefix}centroids",
+                        "labels": f"{to_fields_with_prefix}labels",
+                        "table": f"{to_fields_with_prefix}centroids",
+                        "to_field": field_name,
                     }
                 })
             case _:
@@ -152,7 +155,7 @@ class Split(Transformation):
 class Remapping(Transformation):
     @staticmethod
     @override
-    def apply(
+    def apply(  # noqa: C901
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
     ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
         input_fields = parentOp.input_fields
@@ -163,6 +166,12 @@ class Remapping(Transformation):
         new_fields: dict[str, Field] = {}
         decoding_update: defaultdict[str, list] = defaultdict(list)
         match params:
+            case {"method": "exp"}:
+                field_data = torch.exp(field_data)
+            case {"method": "sigmoid"}:
+                field_data = torch.sigmoid(field_data)
+            case {"method": "signed-exp"}:
+                field_data = torch.sign(field_data) * (torch.expm1(torch.abs(field_data)))
             case {"method": "log"}:
                 decoding_update[field_name].append({"remapping": {"method": "exp"}})
                 field_data = field_data.log()
@@ -220,6 +229,30 @@ class Remapping(Transformation):
                 normalized = normalized * (max_val_f - min_val_f) + min_val_f
 
                 field_data = normalized
+            case {
+                "method": "channelwise-minmax",
+                "min_values": min_values,
+                "max_values": max_values,
+                "dim": dim,
+            }:
+                if field_data is None:
+                    raise ValueError("Field data is None before channelwise remapping")
+
+                min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
+                max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
+
+                # create a shape that's 1 everywhere but in dim, where it has the size of min_values
+                # e.g. [1, 1, 3] for dim=2 with 3 min_values
+                view_shape = [1 if d != dim else -1 for d in range(field_data.dim())]
+
+                min_tensor = min_tensor.view(view_shape)
+                max_tensor = max_tensor.view(view_shape)
+
+                field_range = max_tensor - min_tensor
+                field_range[field_range == 0] = 1.0
+
+                field_data = minmax(field_data)
+                field_data = field_data * field_range + min_tensor
             case _:
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
@@ -241,7 +274,7 @@ class ToField(Transformation):
         decoding_update = defaultdict(list)
         match params:
             case {"to_field_name": to_field_name}:
-                decoding_update[field_name].append({"from_field": to_field_name})
+                decoding_update[to_field_name].append({"to_field": {"to_field_name": field_name}})
                 new_fields[to_field_name] = Field(field_data, parentOp)
             case _:
                 raise ValueError(f"Unknown ToField parameters: {params}")
@@ -259,16 +292,20 @@ class Flatten(Transformation):
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
+        if field_data is None:
+            raise ValueError("Field data is None before flattening")
 
         new_fields: dict[str, Field] = {}
         decoding_update = defaultdict(list)
-
-        start_dim = params.get("start_dim")
-        if start_dim is None:
-            raise ValueError(f"Unknown Flatten parameters: {params}")
-        target_shape = field_data.shape[start_dim:]
-        decoding_update[field_name].append({"reshape_from_dim": {"start_dim": start_dim, "shape": target_shape}})
-        field_data = field_data.flatten(start_dim=start_dim)
+        match params:
+            case {"start_dim": start_dim, "end_dim": end_dim}:
+                field_data = field_data.flatten(start_dim=start_dim, end_dim=end_dim)
+            case {"start_dim": start_dim}:
+                target_shape = field_data.shape[start_dim:]
+                decoding_update[field_name].append({"reshape": {"start_dim": start_dim, "shape": target_shape}})
+                field_data = field_data.flatten(start_dim=start_dim)
+            case _:
+                raise ValueError(f"Unknown Flatten parameters: {params}")
 
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
@@ -287,11 +324,15 @@ class Reshape(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update = defaultdict(list)
-        shape = params.get("shape")
-        if shape is None:
-            raise ValueError(f"Unknown Reshape parameters: {params}")
-        decoding_update[field_name].append({"reshape": {"shape": field_data.shape}})
-        field_data = field_data.reshape(*shape)
+        match params:
+            case {"start_dim": start_dim, "shape": shape}:
+                target_shape = list(field_data.shape[:start_dim]) + list(shape)
+                field_data = field_data.reshape(*target_shape)
+            case {"shape": shape}:
+                decoding_update[field_name].append({"reshape": {"shape": field_data.shape}})
+                field_data = field_data.reshape(*shape)
+            case _:
+                raise ValueError(f"Unknown Reshape parameters: {params}")
 
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
@@ -335,39 +376,46 @@ class ToDType(Transformation):
         new_fields: dict[str, Field] = {}
         decoding_update = defaultdict(list)
 
-        match params:
-            case {"dtype": dtype_str, "round_to_int": round_to_int}:
-                torch_dtype_to_str = {
-                    torch.float32: "float32",
-                }
+        dtype_str = params.get("dtype")
+        round_to_int = params.get("round_to_int", False)
 
-                if round_to_int:
-                    field_data = torch.round(field_data)
+        if dtype_str is None:
+            raise ValueError(f"Unknown ToDType parameters: {params}")
 
-                decoding_update[field_name].append({"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}})
-                match dtype_str:
-                    case "uint8":
-                        if field_data.min() < 0 or field_data.max() > 255:
-                            raise ValueError(
-                                f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                            )
-                        field_data = field_data.to(torch.uint8)
-                    case "uint16":
-                        if field_data.min() < 0 or field_data.max() > 65535:
-                            raise ValueError(
-                                f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                            )
-                        field_data = field_data.to(torch.uint16)
-                    case "int32":
-                        if field_data.min() < -2147483648 or field_data.max() > 2147483647:
-                            raise ValueError(
-                                f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                            )
-                        field_data = field_data.to(torch.int32)
-                    case _:
-                        raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+        torch_dtype_to_str = {
+            torch.float32: "float32",
+            torch.uint8: "uint8",
+            torch.uint16: "uint16",
+            torch.int32: "int32",
+        }
+
+        if round_to_int:
+            field_data = torch.round(field_data)
+
+        decoding_update[field_name].append({"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}})
+        match dtype_str:
+            case "uint8":
+                if field_data.min() < 0 or field_data.max() > 255:
+                    raise ValueError(
+                        f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                    )
+                field_data = field_data.to(torch.uint8)
+            case "uint16":
+                if field_data.min() < 0 or field_data.max() > 65535:
+                    raise ValueError(
+                        f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                    )
+                field_data = field_data.to(torch.uint16)
+            case "int32":
+                if field_data.min() < -2147483648 or field_data.max() > 2147483647:
+                    raise ValueError(
+                        f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                    )
+                field_data = field_data.to(torch.int32)
+            case "float32":
+                field_data = field_data.to(torch.float32)
             case _:
-                raise ValueError(f"Unknown ToDType parameters: {params}")
+                raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
 
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
@@ -553,3 +601,96 @@ class PLAS(Transformation):
             raise TypeError(f"Unknown PLAS parameters: {params}")
 
         return new_fields, decoding_update
+
+
+class Combine(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+        new_fields: dict[str, Field] = {}
+        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        field_data: Tensor = torch.empty(0)
+
+        match params:
+            case {"method": "bytes", "to_field": to_field_name}:
+                num_bytes = len(parentOp.input_fields)
+
+                if num_bytes < 2 or num_bytes > 8:
+                    raise ValueError("num_bytes must be between 2 and 8")
+
+                byte_tensors: list[Tensor] = [
+                    parentOp.input_fields[source_field_name].data for source_field_name in parentOp.input_fields
+                ]
+
+                target_dtype = torch.int32 if num_bytes <= 4 else torch.int64
+
+                field_data = byte_tensors[0].to(target_dtype)
+
+                for i, byte_tensor in enumerate(byte_tensors):
+                    if byte_tensor.dtype != torch.uint8:
+                        raise ValueError(f"Source tensor {i} must be of type uint8")
+                    field_data = field_data | (byte_tensor.to(target_dtype) << (i * 8))
+
+                new_fields[to_field_name] = Field(field_data, parentOp)
+
+            case {"method": method, "dim": dim, "to_field": to_field_name}:
+                prefix_tensors: list[Tensor] = [
+                    parentOp.input_fields[source_field_name].data for source_field_name in parentOp.input_fields
+                ]
+                if method == "stack":
+                    field_data = torch.stack(prefix_tensors, dim=dim)
+                elif method == "concat":
+                    field_data = torch.cat(prefix_tensors, dim=dim)
+                else:
+                    raise ValueError(f"Unsupported combine method: {method}")
+                new_fields[to_field_name] = Field(field_data, parentOp)
+            case _:
+                raise ValueError(f"Unknown Combine parameters: {params}")
+
+        return new_fields, decoding_update
+
+
+class Lookup(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+        input_fields = parentOp.input_fields
+
+        new_fields: dict[str, Field] = {}
+        decoding_update = defaultdict(list)
+        match params:
+            case {"labels": from_field, "table": to_field, "to_field": to_field_name}:
+                values = input_fields[to_field].data[input_fields[from_field].data.to(torch.int32)]
+                new_fields[to_field_name] = Field(values, parentOp)
+            case _:
+                raise ValueError(f"Unknown lookup parameters: {params}")
+
+        return new_fields, decoding_update
+
+
+transformation_map = {
+    "cluster": Cluster,
+    "split": Split,
+    "flatten": Flatten,
+    "reshape": Reshape,
+    "remapping": Remapping,
+    "to_field": ToField,
+    "permute": Permute,
+    "to_dtype": ToDType,
+    "split_bytes": SplitBytes,
+    "reindex": Reindex,
+    "plas": PLAS,
+    "lookup": Lookup,
+    "combine": Combine,
+}
+
+
+def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Field"], defaultdict[str, list]]:
+    transformation = transformation_map.get(parentOp.transform_type)
+    if transformation is None:
+        raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
+    return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose)

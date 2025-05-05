@@ -32,21 +32,9 @@ class Field:
 
         from ..models.operations import Operation
 
-        # TODO: set out_field
         op = Operation(
             input_fields={},
-            params={"from": {"file": file_path, "last modified": file_path.stat().st_mtime}},
-        )
-        return cls(data, op)
-
-    @classmethod
-    def from_name(cls, data: Tensor, name: str) -> "Field":
-        """This function should not be used. It is only temporarily used until the decoder is refactored"""
-        from ..models.operations import Operation
-
-        op = Operation(
-            input_fields={},
-            params={"from": {"name": name}},
+            params={"from": {"file": str(file_path), "last modified": file_path.stat().st_mtime}},
         )
         return cls(data, op)
 

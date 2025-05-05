@@ -3,37 +3,10 @@ from collections import defaultdict
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
-from ..models.transformations import (
-    PLAS,
-    Cluster,
-    Flatten,
-    Permute,
-    Reindex,
-    Remapping,
-    Reshape,
-    Split,
-    SplitBytes,
-    ToDType,
-    ToField,
-    Transformation,
-)
+from ..models.transformations import Transformation, apply_transform
 
 if TYPE_CHECKING:
     from ..models.fields import Field
-
-transformation_map = {
-    "cluster": Cluster,
-    "split": Split,
-    "flatten": Flatten,
-    "reshape": Reshape,
-    "remapping": Remapping,
-    "to_field": ToField,
-    "permute": Permute,
-    "to_dtype": ToDType,
-    "split_bytes": SplitBytes,
-    "reindex": Reindex,
-    "plas": PLAS,
-}
 
 
 class Operation:
@@ -51,11 +24,17 @@ class Operation:
     @classmethod
     def from_json(
         cls,
-        input_field_param: list[str],
+        input_field_param: list[str] | dict[str, str],
         transform_param: dict[str, Any],
         field_data: dict[str, "Field"],
     ) -> "Operation":
-        input_fields = {name: field_data[name] for name in input_field_param}
+        if isinstance(input_field_param, dict):
+            prefix = input_field_param.get("from_fields_with_prefix", None)
+            if prefix is None:
+                raise ValueError("Expected a prefix in the input field parameters")
+            input_fields = {name: field_data[name] for name in field_data if name.startswith(prefix)}
+        elif isinstance(input_field_param, list):
+            input_fields = {name: field_data[name] for name in input_field_param}
         params = transform_param
         return cls(input_fields, params)
 
@@ -74,7 +53,4 @@ class Operation:
         }
 
     def apply(self, verbose: bool) -> tuple[dict[str, "Field"], defaultdict[str, list]]:
-        transformation = transformation_map.get(self.transform_type)
-        if transformation is None:
-            raise ValueError(f"Unknown transformation: {self.transform_type}")
-        return transformation.apply(self.params[self.transform_type], self, verbose)
+        return apply_transform(self, verbose=verbose)
