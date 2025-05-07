@@ -19,7 +19,7 @@ class DecodingParams:
     """Parameters for decoding 3D scene formats."""
 
     files: list[dict[str, str]]
-    ops: dict[str, list[dict[str, Any]]]
+    ops: list[dict[str, Any]]
     scene: dict[str, Any]
 
     @classmethod
@@ -52,7 +52,7 @@ class DecodingParams:
 def process_operation(
     op: Operation,
     verbose: bool = False,
-) -> tuple[dict[str, Field]]:
+) -> dict[str, Field]:
     """Process the operation and return the new fields and decoding updates."""
     print("Cache miss")
     return op.apply(verbose=verbose)[0]
@@ -88,12 +88,12 @@ class SceneDecoder:
 
     def _print_field_stats(self) -> None:
         print("Decoded field statistics:")
-        for field_name, field_data in sorted(self.fields.items()):
-            stats = f"{field_name}: \t{tuple(field_data.shape)} | {field_data.dtype}"
-            if field_data.numel() > 0:
-                stats += f" | Min: {field_data.min().item():.4f} | Max: {field_data.max().item():.4f}"
-                stats += f" | Median: {field_data.median().item():.4f}"
-                # stats += f" | Unique Count: {field_data.unique().numel()}"
+        for field_name, field_obj in sorted(self.fields.items()):
+            stats = f"{field_name}: \t{tuple(field_obj.data.shape)} | {field_obj.data.dtype}"
+            if field_obj.data.numel() > 0:
+                stats += f" | Min: {field_obj.data.min().item():.4f} | Max: {field_obj.data.max().item():.4f}"
+                stats += f" | Median: {field_obj.data.median().item():.4f}"
+                # stats += f" | Unique Count: {field_obj.data.unique().numel()}"
             print(stats)
 
     def decode(self, verbose: bool) -> None:

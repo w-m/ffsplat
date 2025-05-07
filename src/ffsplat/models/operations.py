@@ -1,5 +1,4 @@
 import json
-from collections import defaultdict
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -63,5 +62,5 @@ class Operation:
             "params": self.params,
         }
 
-    def apply(self, verbose: bool) -> tuple[dict[str, "Field"], defaultdict[str, list]]:
+    def apply(self, verbose: bool) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
         return apply_transform(self, verbose=verbose)

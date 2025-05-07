@@ -7,13 +7,10 @@ from typing import Any
 
 import torch
 import yaml
-from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 
 from ..models.fields import Field
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
-
-register_avif_opener()
 
 
 class SerializableDumper(yaml.SafeDumper):
@@ -52,6 +49,9 @@ class SerializableDumper(yaml.SafeDumper):
         # Use flow style for lists that contain only numbers
         if all(isinstance(item, (int, float)) for item in data):
             sequence.flow_style = True
+        # Use flow style for lists that contain only strings
+        if all(isinstance(item, str) for item in data):
+            sequence.flow_style = True
         return sequence
 
     def represent_general(self, data: Any) -> Any:
@@ -77,16 +77,19 @@ class DecodingParams:
 
     meta: dict[str, Any] = field(default_factory=dict)
 
-    files: list[dict[str, str]] = field(default_factory=list)
-    fields: defaultdict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
+    ops: list[dict[str, Any]] = field(default_factory=list)
     scene: dict[str, Any] = field(default_factory=dict)
 
-    def reverse_fields(self) -> None:
+    def reverse_ops(self) -> None:
         """The operations we're accumulation during encoding need to be reversed for decoding."""
-        prev_fields = self.fields.copy()
-        self.fields = defaultdict(list)
-        for field_name, field_ops in reversed(prev_fields.items()):
-            self.fields[field_name] = list(reversed(field_ops))
+        prev_ops = self.ops.copy()
+        self.ops = []
+        for op in reversed(prev_ops):
+            self.ops.append(op)
+            # don't reverse the file reading operations
+            if op["input_fields"] == []:
+                continue
+            self.ops[-1]["transforms"].reverse()
 
 
 @dataclass
@@ -97,7 +100,6 @@ class EncodingParams:
     scene: dict[str, Any]
 
     ops: list[dict[str, Any]]
-    files: list[dict[str, str]]
 
     @classmethod
     def from_yaml_file(cls, yaml_path: Path) -> "EncodingParams":
@@ -108,7 +110,6 @@ class EncodingParams:
             profile_version=data["profile_version"],
             scene=data["scene"],
             ops=data["ops"],
-            files=data.get("files", []),
         )
 
 
@@ -124,7 +125,7 @@ SerializableDumper.add_multi_representer(object, SerializableDumper.represent_ge
 def process_operation(
     op: Operation,
     verbose: bool,
-) -> tuple[dict[str, Field], defaultdict[str, list]]:
+) -> tuple[dict[str, Field], list[dict[str, Any]]]:
     """Process the operation and return the new fields and decoding updates."""
     print("Cache miss")
     return op.apply(verbose=verbose)
@@ -157,10 +158,20 @@ class SceneEncoder:
             input_fields_params = op_params["input_fields"]
             for transform_param in op_params["transforms"]:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
-                new_fields, decoding_update = process_operation(op, verbose=verbose)
-                for key, op_list in decoding_update.items():
-                    self.decoding_params.fields[key].extend(op_list)
+                new_fields, decoding_updates = process_operation(op, verbose=verbose)
                 self.fields.update(new_fields)
+                # not every operation will produce a decoding update
+                if not decoding_updates:
+                    continue
+                for decoding_update in decoding_updates:
+                    # if the last decoding update has the same input fields we can combine the trasnforms into one list
+                    if (
+                        self.decoding_params.ops
+                        and self.decoding_params.ops[-1]["input_fields"] == decoding_update["input_fields"]
+                    ):
+                        self.decoding_params.ops[-1]["transforms"].append(*decoding_update["transforms"])
+                    else:
+                        self.decoding_params.ops.append(decoding_update)
 
     def encode(self, verbose: bool) -> None:
         # container as folder for now
@@ -171,8 +182,8 @@ class SceneEncoder:
         if verbose:
             self._print_field_stats()
 
-        # revert the order of the fields in self.decoding_params to enable straightforward decoding
-        self.decoding_params.reverse_fields()
+        # revert the order of the operations in self.decoding_params to enable straightforward decoding
+        self.decoding_params.reverse_ops()
 
         # Write the YAML directly using our custom dumper
         with open(self.output_path / "container_meta.yaml", "w") as f:

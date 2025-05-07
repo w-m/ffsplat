@@ -27,19 +27,22 @@ class Field:
         return self.to_json() == value.to_json() if isinstance(value, Field) else False
 
     @classmethod
-    def from_file(cls, data: Tensor, file_path: Path) -> "Field":
+    def from_file(cls, data: Tensor, file_path: Path, field_name: str) -> "Field":
         """Create a field from a file instead of a operation"""
 
         from ..models.operations import Operation
 
         op = Operation(
             input_fields={},
-            params={"from": {"file": str(file_path), "last modified": file_path.stat().st_mtime}},
+            params={
+                "from": {"file": str(file_path), "last modified": Path(file_path).stat().st_mtime},
+                "field_name": field_name,
+            },
         )
         return cls(data, op)
 
     def to(self, device: str | torch.device) -> "Field":
-        return Field(self.data.to(device), self.op)
+        return Field(self.data.to(device, copy=True), self.op)
 
     def to_json(self) -> dict[str, Any]:
         """Convert the field to a JSON-serializable format."""

@@ -7,11 +7,13 @@ from plyfile import PlyData, PlyElement
 from ..models.fields import Field
 
 
-def decode_ply(file_path: Path, field_prefix: str) -> dict[str, torch.Tensor]:
+def decode_ply(file_path: Path, field_prefix: str) -> dict[str, Field]:
     vertices = PlyData.read(file_path)["vertex"]
     data = {}
     for prop in vertices.properties:
-        data[f"{field_prefix}{prop.name}"] = Field.from_file(torch.from_numpy(vertices[prop.name]), file_path)
+        data[f"{field_prefix}{prop.name}"] = Field.from_file(
+            torch.from_numpy(vertices[prop.name]), file_path, f"{field_prefix}{prop.name}"
+        )
 
     return data
 

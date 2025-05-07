@@ -1,6 +1,5 @@
 import math
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, override
@@ -9,6 +8,7 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
+from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
 from torchpq.clustering import KMeans  # type: ignore[import-untyped]
@@ -25,6 +25,8 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
         case "png":
             cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
         case "avif":
+            # TODO: only do this once?
+            register_avif_opener()
             Image.fromarray(field_data.cpu().numpy()).save(
                 output_file_path,
                 format="AVIF",
@@ -45,7 +47,7 @@ class PLASConfig:
     # activated: bool
     shuffle: bool
     improvement_break: float
-    # this is not needed for plas, just to now where to store the result
+    # this is not needed for plas, just to know where to store the result
     to_field: str
     weights: dict[str, float] = field(default_factory=dict)
 
@@ -72,7 +74,7 @@ class Transformation(ABC):
     @abstractmethod
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         """Apply the transformation to the input fields. returns new/updated fields and decoding updates.
         Transformations that are only available for decoding do return empty decoding updates"""
         pass
@@ -83,7 +85,7 @@ class Cluster(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         # Implement the clustering logic here
         input_fields = parentOp.input_fields
 
@@ -91,7 +93,7 @@ class Cluster(Transformation):
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {
                 "method": "kmeans",
@@ -104,12 +106,17 @@ class Cluster(Transformation):
                 centroids = kmeans.centroids.permute(1, 0)
                 new_fields[f"{to_fields_with_prefix}labels"] = Field(labels, parentOp)
                 new_fields[f"{to_fields_with_prefix}centroids"] = Field(centroids, parentOp)
-                decoding_update[field_name].append({
-                    "lookup": {
-                        "labels": f"{to_fields_with_prefix}labels",
-                        "table": f"{to_fields_with_prefix}centroids",
-                        "to_field": field_name,
-                    }
+                decoding_update.append({
+                    "input_fields": [f"{to_fields_with_prefix}labels", f"{to_fields_with_prefix}centroids"],
+                    "transforms": [
+                        {
+                            "lookup": {
+                                "labels": f"{to_fields_with_prefix}labels",
+                                "table": f"{to_fields_with_prefix}centroids",
+                                "to_field": field_name,
+                            }
+                        }
+                    ],
                 })
             case _:
                 raise ValueError(f"Unknown clustering method: {params['method']}")
@@ -121,14 +128,14 @@ class Split(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {
                 "split_size_or_sections": split_size_or_sections,
@@ -142,12 +149,17 @@ class Split(Transformation):
                         chunk = chunk.squeeze(dim)
                     new_fields[target_field_name] = Field(chunk, parentOp)
 
-                decoding_update[field_name].append({
-                    "combine": {
-                        "from_field_list": to_field_list,
-                        "method": "stack" if split_size_or_sections == 1 else "concat",
-                        "dim": dim,
-                    }
+                decoding_update.append({
+                    "input_fields": to_field_list,
+                    "transforms": [
+                        {
+                            "combine": {
+                                "method": "stack" if split_size_or_sections == 1 else "concat",
+                                "dim": dim,
+                                "to_field": field_name,
+                            }
+                        }
+                    ],
                 })
 
             # TODO: should squeeze be optional?
@@ -160,12 +172,17 @@ class Split(Transformation):
                 for i, chunk in enumerate(chunks):
                     new_fields[f"{to_fields_with_prefix}{i}"] = Field(chunk.squeeze(dim), parentOp)
 
-                decoding_update[field_name].append({
-                    "combine": {
-                        "from_fields_with_prefix": to_fields_with_prefix,
-                        "method": "stack" if split_size_or_sections == 1 else "concat",
-                        "dim": dim,
-                    }
+                decoding_update.append({
+                    "input_fields": {"from_fields_with_prefix": to_fields_with_prefix},
+                    "transforms": [
+                        {
+                            "combine": {
+                                "method": "stack" if split_size_or_sections == 1 else "concat",
+                                "dim": dim,
+                                "to_field": field_name,
+                            }
+                        }
+                    ],
                 })
 
             case _:
@@ -178,14 +195,14 @@ class Remapping(Transformation):
     @override
     def apply(  # noqa: C901
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update: defaultdict[str, list] = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {"method": "exp"}:
                 field_data = torch.exp(field_data)
@@ -194,15 +211,24 @@ class Remapping(Transformation):
             case {"method": "signed-exp"}:
                 field_data = torch.sign(field_data) * (torch.expm1(torch.abs(field_data)))
             case {"method": "log"}:
-                decoding_update[field_name].append({"remapping": {"method": "exp"}})
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"remapping": {"method": "exp"}}],
+                })
                 field_data = field_data.log()
 
             case {"method": "signed-log"}:
-                decoding_update[field_name].append({"remapping": {"method": "signed-exp"}})
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"remapping": {"method": "signed-exp"}}],
+                })
                 field_data = torch.sign(field_data) * torch.log1p(torch.abs(field_data))
 
             case {"method": "inverse-sigmoid"}:
-                decoding_update[field_name].append({"remapping": {"method": "sigmoid"}})
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"remapping": {"method": "sigmoid"}}],
+                })
                 # ensure that we can encode opacity values in the full range [0, 1]
                 # by clamping the values to (eps, 1 - eps) -> no infinite values from 0.0, 1.0
                 eps = 1e-6
@@ -216,12 +242,17 @@ class Remapping(Transformation):
                 min_val_f = float(min_val)
                 max_val_f = float(max_val)
 
-                decoding_update[field_name].append({
-                    "remapping": {
-                        "method": "minmax",
-                        "min": field_min,
-                        "max": field_max,
-                    }
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "remapping": {
+                                "method": "minmax",
+                                "min": field_min,
+                                "max": field_max,
+                            }
+                        }
+                    ],
                 })
 
                 field_data = minmax(field_data)
@@ -234,13 +265,18 @@ class Remapping(Transformation):
                 min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
                 max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
 
-                decoding_update[field_name].append({
-                    "remapping": {
-                        "method": "channelwise-minmax",
-                        "min_values": min_vals.tolist(),
-                        "max_values": max_vals.tolist(),
-                        "dim": dim,
-                    }
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "remapping": {
+                                "method": "channelwise-minmax",
+                                "min_values": min_vals.tolist(),
+                                "max_values": max_vals.tolist(),
+                                "dim": dim,
+                            }
+                        }
+                    ],
                 })
 
                 field_range = max_vals - min_vals
@@ -285,17 +321,20 @@ class ToField(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {"to_field_name": to_field_name}:
-                decoding_update[to_field_name].append({"to_field": {"to_field_name": field_name}})
+                decoding_update.append({
+                    "input_fields": [to_field_name],
+                    "transforms": [{"to_field": {"to_field_name": field_name}}],
+                })
                 new_fields[to_field_name] = Field(field_data, parentOp)
             case _:
                 raise ValueError(f"Unknown ToField parameters: {params}")
@@ -308,7 +347,7 @@ class Flatten(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
@@ -317,13 +356,16 @@ class Flatten(Transformation):
             raise ValueError("Field data is None before flattening")
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {"start_dim": start_dim, "end_dim": end_dim}:
                 field_data = field_data.flatten(start_dim=start_dim, end_dim=end_dim)
             case {"start_dim": start_dim}:
                 target_shape = field_data.shape[start_dim:]
-                decoding_update[field_name].append({"reshape": {"start_dim": start_dim, "shape": target_shape}})
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"reshape": {"start_dim": start_dim, "shape": target_shape}}],
+                })
                 field_data = field_data.flatten(start_dim=start_dim)
             case _:
                 raise ValueError(f"Unknown Flatten parameters: {params}")
@@ -337,20 +379,23 @@ class Reshape(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {"start_dim": start_dim, "shape": shape}:
                 target_shape = list(field_data.shape[:start_dim]) + list(shape)
                 field_data = field_data.reshape(*target_shape)
             case {"shape": shape}:
-                decoding_update[field_name].append({"reshape": {"shape": field_data.shape}})
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"reshape": {"shape": field_data.shape}}],
+                })
                 field_data = field_data.reshape(*shape)
             case _:
                 raise ValueError(f"Unknown Reshape parameters: {params}")
@@ -364,19 +409,22 @@ class Permute(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
 
         dims = params.get("dims")
         if dims is None:
             raise ValueError(f"Unknown Permute parameters: {params}")
-        decoding_update[field_name].append({"permute": {"dims": dims}})
+        decoding_update.append({
+            "input_fields": [field_name],
+            "transforms": [{"permute": {"dims": dims}}],
+        })
         field_data = field_data.permute(*dims)
 
         new_fields[field_name] = Field(field_data, parentOp)
@@ -388,14 +436,14 @@ class ToDType(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
 
         dtype_str = params.get("dtype")
         round_to_int = params.get("round_to_int", False)
@@ -413,7 +461,10 @@ class ToDType(Transformation):
         if round_to_int:
             field_data = torch.round(field_data)
 
-        decoding_update[field_name].append({"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}})
+        decoding_update.append({
+            "input_fields": [field_name],
+            "transforms": [{"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}}],
+        })
         match dtype_str:
             case "uint8":
                 if field_data.min() < 0 or field_data.max() > 255:
@@ -447,14 +498,14 @@ class SplitBytes(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         field_name = next(iter(input_fields.keys()))
         field_data = input_fields[field_name].data
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
 
         match params:
             case {"num_bytes": num_bytes, "to_fields_with_prefix": to_fields_with_prefix}:
@@ -477,11 +528,16 @@ class SplitBytes(Transformation):
                     new_fields[res_field_name] = Field(mask.to(torch.uint8), parentOp)
 
                 # TODO: why from_field_list and not from_fields_with_prefix?
-                decoding_update[field_name].append({
-                    "combine": {
-                        "from_field_list": res_field_names,
-                        "method": "bytes",
-                    }
+                decoding_update.append({
+                    "input_fields": res_field_names,
+                    "transforms": [
+                        {
+                            "combine": {
+                                "method": "bytes",
+                                "to_field": field_name,
+                            }
+                        }
+                    ],
                 })
             case _:
                 raise ValueError(f"Unknown SplitBytes parameters: {params}")
@@ -494,18 +550,21 @@ class Reindex(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
 
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
                 if len(index_field_obj.data.shape) != 2:
                     raise ValueError("Expecting grid for re-index operation")
-                decoding_update[src_field_name].append({"flatten": {"start_dim": 0, "end_dim": 1}})
+                decoding_update.append({
+                    "input_fields": [src_field_name],
+                    "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
+                })
                 original_data = input_fields[src_field_name].data
                 new_fields[src_field_name] = Field(original_data[index_field_obj.data], parentOp)
             case _:
@@ -606,9 +665,8 @@ class PLAS(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
-        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 
         plas_cfg_dict = params
         if isinstance(plas_cfg_dict, dict):
@@ -621,7 +679,7 @@ class PLAS(Transformation):
         else:
             raise TypeError(f"Unknown PLAS parameters: {params}")
 
-        return new_fields, decoding_update
+        return new_fields, []
 
 
 class Combine(Transformation):
@@ -629,9 +687,8 @@ class Combine(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
-        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
         field_data: Tensor = torch.empty(0)
 
         match params:
@@ -657,20 +714,20 @@ class Combine(Transformation):
                 new_fields[to_field_name] = Field(field_data, parentOp)
 
             case {"method": method, "dim": dim, "to_field": to_field_name}:
-                prefix_tensors: list[Tensor] = [
+                tensors: list[Tensor] = [
                     parentOp.input_fields[source_field_name].data for source_field_name in parentOp.input_fields
                 ]
                 if method == "stack":
-                    field_data = torch.stack(prefix_tensors, dim=dim)
+                    field_data = torch.stack(tensors, dim=dim)
                 elif method == "concat":
-                    field_data = torch.cat(prefix_tensors, dim=dim)
+                    field_data = torch.cat(tensors, dim=dim)
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
                 new_fields[to_field_name] = Field(field_data, parentOp)
             case _:
                 raise ValueError(f"Unknown Combine parameters: {params}")
 
-        return new_fields, decoding_update
+        return new_fields, []
 
 
 class Lookup(Transformation):
@@ -678,11 +735,10 @@ class Lookup(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         new_fields: dict[str, Field] = {}
-        decoding_update = defaultdict(list)
         match params:
             case {"labels": from_field, "table": to_field, "to_field": to_field_name}:
                 values = input_fields[to_field].data[input_fields[from_field].data.to(torch.int32)]
@@ -690,7 +746,7 @@ class Lookup(Transformation):
             case _:
                 raise ValueError(f"Unknown lookup parameters: {params}")
 
-        return new_fields, decoding_update
+        return new_fields, []
 
 
 class WriteFile(Transformation):
@@ -698,15 +754,16 @@ class WriteFile(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
-        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {"type": "ply", "file_path": file_path, "base_path": base_path, "field_prefix": field_prefix}:
                 fields_to_write = {name[len(field_prefix) :]: field for name, field in parentOp.input_fields.items()}
-                decoding_update["TODO"].append({
-                    "file_path": file_path,
-                    "type": "ply",
-                    "field_prefix": field_prefix,
+                decoding_update.append({
+                    "input_fields": [],
+                    "transforms": [
+                        {"read_file": {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}}
+                    ],
                 })
 
                 output_file_path = Path(base_path) / Path(file_path)
@@ -724,10 +781,11 @@ class WriteFile(Transformation):
                         coding_params if isinstance(coding_params, dict) else {},
                     )
 
-                    decoding_update["TODO"].append({
-                        "file_path": file_path,
-                        "type": file_type,
-                        "field_name": field_name,
+                    decoding_update.append({
+                        "input_fields": [],
+                        "transforms": [
+                            {"read_file": {"file_path": file_path, "type": file_type, "field_name": field_name}}
+                        ],
                     })
             case _:
                 raise ValueError(f"Unknown WriteFile parameters: {params}")
@@ -740,9 +798,9 @@ class ReadFile(Transformation):
     @override
     def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], defaultdict[str, list[dict[str, Any]]]]:
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
-        decoding_update: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+        decoding_update: list[dict[str, Any]] = []
         match params:
             case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
                 ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
@@ -754,9 +812,11 @@ class ReadFile(Transformation):
                             cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
                         )
                     case "avif":
+                        # TODO: only do this once?
+                        register_avif_opener()
                         img_field_data = torch.tensor(np.array(Image.open(file_path)))
 
-                new_fields[field_name] = Field.from_file(img_field_data, file_path)
+                new_fields[field_name] = Field.from_file(img_field_data, file_path, field_name)
             case _:
                 raise ValueError(f"Unknown ReadFile parameters: {params}")
 
@@ -782,7 +842,7 @@ transformation_map = {
 }
 
 
-def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Field"], defaultdict[str, list]]:
+def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
     transformation = transformation_map.get(parentOp.transform_type)
     if transformation is None:
         raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
