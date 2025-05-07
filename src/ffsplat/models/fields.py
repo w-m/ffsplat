@@ -26,6 +26,10 @@ class Field:
     def __eq__(self, value: object, /) -> bool:
         return self.to_json() == value.to_json() if isinstance(value, Field) else False
 
+    def copy(self) -> "Field":
+        """Return a copy of the field."""
+        return Field(self.data.clone(), self.op)
+
     @classmethod
     def from_file(cls, data: Tensor, file_path: Path, field_name: str) -> "Field":
         """Create a field from a file instead of a operation"""

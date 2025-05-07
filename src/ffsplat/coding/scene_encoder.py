@@ -1,3 +1,4 @@
+import copy
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -159,19 +160,17 @@ class SceneEncoder:
             for transform_param in op_params["transforms"]:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
                 new_fields, decoding_updates = process_operation(op, verbose=verbose)
-                self.fields.update(new_fields)
-                # not every operation will produce a decoding update
-                if not decoding_updates:
-                    continue
-                for decoding_update in decoding_updates:
-                    # if the last decoding update has the same input fields we can combine the trasnforms into one list
+                #  if the coding_updates are not a copy the cache will be wrong
+                for decoding_update in copy.deepcopy(decoding_updates):
+                    # if the last decoding update has the same input fields we can combine the transforms into one list
                     if (
                         self.decoding_params.ops
                         and self.decoding_params.ops[-1]["input_fields"] == decoding_update["input_fields"]
                     ):
-                        self.decoding_params.ops[-1]["transforms"].append(*decoding_update["transforms"])
+                        self.decoding_params.ops[-1]["transforms"] += decoding_update["transforms"]
                     else:
                         self.decoding_params.ops.append(decoding_update)
+                self.fields.update(new_fields)
 
     def encode(self, verbose: bool) -> None:
         # container as folder for now

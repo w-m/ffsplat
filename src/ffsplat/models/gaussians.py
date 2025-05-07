@@ -69,12 +69,13 @@ class Gaussians:
         return int(math.sqrt(self.sh.data.shape[1]) - 1)
 
     def to_field_dict(self) -> dict:
+        """Return a dictionary of copies of the fields."""
         return {
-            "means": self.means,
-            "quaternions": self.quaternions,
-            "scales": self.scales,
-            "opacities": self.opacities,
-            "sh": self.sh,
+            "means": self.means.copy(),
+            "quaternions": self.quaternions.copy(),
+            "scales": self.scales.copy(),
+            "opacities": self.opacities.copy(),
+            "sh": self.sh.copy(),
         }
 
     def to_dict(self) -> dict:
