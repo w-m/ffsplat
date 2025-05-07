@@ -31,9 +31,9 @@ dependencies = [
     "pillow>=11.1.0,<12.0.0",
     "pillow-heif>=0.22.0,<1.0.0",
     "tqdm>=4.67.1,<5.0.0",
+    "torchvision>=0.21.0,<1.0.0",
     "torchmetrics>=1.6.1,<2.0.0",
     "torchpq>=0.3.0.6,<0.4.0", # kmeans clustering
-    "torchvision>=0.21.0,<1.0.0", # torchmetrics dependency, needs to be installed explicitly to use cuda
     "cupy>=13.4.1,<14.0.0", # torchpq dependency
     "camorph>=0.3.6,<1.0.0",
     "plas",
@@ -166,4 +166,5 @@ preview = true
 
 [tool.deptry.per_rule_ignores]
 # cupy required for kmeans in torchpq, but we don't import it explicitly in the code base
-DEP002 = ["cupy"]
+# torchvision is required for torchmetrics
+DEP002 = ["cupy", "torchvision"]
