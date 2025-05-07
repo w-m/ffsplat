@@ -181,9 +181,9 @@ class InteractiveConversionTool:
         self._load_scene(len(self.scenes) - 1)
 
     def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
-        return "the description does not work with the new encoding config yet"
         description = "**Template**  \n"
         description += f"{output_format}  \n"
+        return description
         for field_name, field_operations in encoding_params.fields.items():
             for field_operation in field_operations:
                 for operation, _ in operations.items():
