@@ -6,7 +6,7 @@ from typing import Any
 import yaml
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 
-from ..models.fields import Field
+from ..models.fields import Field, FieldDict
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
 
@@ -61,7 +61,7 @@ def process_operation(
 @dataclass
 class SceneDecoder:
     decoding_params: DecodingParams
-    fields: dict[str, Field] = field(default_factory=dict)
+    fields: FieldDict = field(default_factory=FieldDict)
     scene: Gaussians = field(init=False)
 
     def _process_fields(self) -> None:
@@ -86,20 +86,10 @@ class SceneDecoder:
             case _:
                 raise ValueError("Unsupported scene format")
 
-    def _print_field_stats(self) -> None:
-        print("Decoded field statistics:")
-        for field_name, field_obj in sorted(self.fields.items()):
-            stats = f"{field_name}: \t{tuple(field_obj.data.shape)} | {field_obj.data.dtype}"
-            if field_obj.data.numel() > 0:
-                stats += f" | Min: {field_obj.data.min().item():.4f} | Max: {field_obj.data.max().item():.4f}"
-                stats += f" | Median: {field_obj.data.median().item():.4f}"
-                # stats += f" | Unique Count: {field_obj.data.unique().numel()}"
-            print(stats)
-
     def decode(self, verbose: bool) -> None:
         self._process_fields()
         if verbose:
-            self._print_field_stats()
+            self.fields.print_field_stats()
         self._create_scene()
 
 

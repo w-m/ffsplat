@@ -9,7 +9,7 @@ from typing import Any
 import torch
 import yaml
 
-from ..models.fields import Field
+from ..models.fields import Field, FieldDict
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
 
@@ -138,18 +138,7 @@ class SceneEncoder:
     output_path: Path
     decoding_params: DecodingParams
 
-    fields: dict[str, Field] = field(default_factory=dict)
-
-    def _print_field_stats(self) -> None:
-        # TODO duplicated code from scene_decoder
-        print("Encoded field statistics:")
-        for field_name, field_obj in sorted(self.fields.items()):
-            stats = f"{field_name}: \t{tuple(field_obj.data.shape)} | {field_obj.data.dtype}"
-            if field_obj.data.numel() > 0:
-                stats += f" | Min: {field_obj.data.min().item():.4f} | Max: {field_obj.data.max().item():.4f}"
-                stats += f" | Median: {field_obj.data.median().item():.4f}"
-                # stats += f" | Unique Count: {field_obj.data.unique().numel()}"
-            print(stats)
+    fields: FieldDict
 
     def _encode_fields(self, verbose: bool) -> None:
         """Process the fields according to the operations defined in the encoding parameters."""
@@ -179,7 +168,7 @@ class SceneEncoder:
         self._encode_fields(verbose=verbose)
 
         if verbose:
-            self._print_field_stats()
+            self.fields.print_field_stats()
 
         # revert the order of the operations in self.decoding_params to enable straightforward decoding
         self.decoding_params.reverse_ops()

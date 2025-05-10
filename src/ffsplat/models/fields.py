@@ -51,3 +51,15 @@ class Field:
     def to_json(self) -> dict[str, Any]:
         """Convert the field to a JSON-serializable format."""
         return self.op.to_json()
+
+
+class FieldDict(dict[str, Field]):
+    def print_field_stats(self) -> None:
+        print("Encoded field statistics:")
+        for field_name, field_obj in sorted(self.items()):
+            stats = f"{field_name}: \t{tuple(field_obj.data.shape)} | {field_obj.data.dtype}"
+            if field_obj.data.numel() > 0:
+                stats += f" | Min: {field_obj.data.min().item():.4f} | Max: {field_obj.data.max().item():.4f}"
+                stats += f" | Median: {field_obj.data.median().item():.4f}"
+                # stats += f" | Unique Count: {field_obj.data.unique().numel()}"
+            print(stats)
