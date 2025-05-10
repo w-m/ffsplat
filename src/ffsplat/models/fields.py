@@ -59,7 +59,12 @@ class FieldDict(dict[str, Field]):
         for field_name, field_obj in sorted(self.items()):
             stats = f"{field_name}: \t{tuple(field_obj.data.shape)} | {field_obj.data.dtype}"
             if field_obj.data.numel() > 0:
-                stats += f" | Min: {field_obj.data.min().item():.4f} | Max: {field_obj.data.max().item():.4f}"
-                stats += f" | Median: {field_obj.data.median().item():.4f}"
+                data_for_stats = field_obj.data
+                if field_obj.data.dtype == torch.uint16:
+                    # min/max not implemented for uint16, convert to int32 for stats
+                    data_for_stats = field_obj.data.to(torch.int32)
+
+                stats += f" | Min: {data_for_stats.min().item():.4f} | Max: {data_for_stats.max().item():.4f}"
+                stats += f" | Median: {data_for_stats.median().item():.4f}"
                 # stats += f" | Unique Count: {field_obj.data.unique().numel()}"
             print(stats)
