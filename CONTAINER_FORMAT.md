@@ -2,7 +2,7 @@
 
 ## Introduction
 
-3D Gaussian Splatting (3DGS) is an exciting method for representing radiance fields. The explicit nature of the list of primitives enables simple scene editing, which implicit or neural methods like Neural Radiance Fields (NeRFs) can't provide. The original implementation by INRIA stores these primitives as 3D points with attributes in `.ply` files, using `float32` values for each attribute. This consumes significant space, particularly due to the large number of spherical harmonics attributes (45), resulting in 232 bytes total per primitive, and Gigabyte-sized files for simple scenes. This has led to a wealth of research into optimizing storage and compressing 3DGS-based scenes. An overview over research directions can be found in this survey paper: [*3DGS.zip: A survey on 3D Gaussian Splatting Compression Methods*](https://w-m.github.io/3dgs-compression-survey/) (Bagdasarian et. al.).
+3D Gaussian Splatting (3DGS) is an exciting method for representing radiance fields. The explicit nature of the list of primitives enables simple scene editing, which implicit or neural methods like Neural Radiance Fields (NeRFs) can't provide. The original implementation by INRIA stores these primitives as 3D points with attributes in `.ply` files, using `float32` values for each attribute. This consumes significant space, particularly due to the large number of spherical harmonics attributes (45), resulting in 232 bytes total per primitive, and Gigabyte-sized files for simple scenes. This has led to a wealth of research into optimizing storage and compressing 3DGS-based scenes. An overview over research directions can be found in this survey paper: [_3DGS.zip: A survey on 3D Gaussian Splatting Compression Methods_](https://w-m.github.io/3dgs-compression-survey/) (Bagdasarian et. al.).
 
 ## Compression Methods
 
@@ -28,7 +28,6 @@ A [Gaussian Splatting Container Format](https://github.com/SharkWipf/gaussian-sp
 Discussions of this proposal are happening in the MrNeRF & Brush Discord channel #gs-container-format. Feedback and active participation is welcome.
 
 [![](https://dcbadge.limes.pink/api/server/https://discord.gg/TbxJST2BbC)](https://discord.gg/TbxJST2BbC)
-
 
 ## Current Formats
 
@@ -104,11 +103,13 @@ The metadata file is stored alongside compressed files. The entire package (meta
 A container metadata file includes:
 
 1. **General information**:
+
    - Container identifier
    - Container version
    - Packer (software used to create the container)
 
 2. **Profile**:
+
    - Format type (e.g., "3DGS-INRIA.ply", ".spz", or "SOG-web")
    - Profile version
 
@@ -126,6 +127,7 @@ For example, a simple 3DGS .ply file entry might look like:
 As seen in the `3DGS_INRIA_ply_decoding_template.yaml` example, this tells the decoder to read the PLY file and make all vertex attributes available as fields with the specified prefix.
 
 4. **Fields**:
+
    - Describes how to process and transform data into final scene parameters
 
 5. **Scene**:
@@ -153,11 +155,12 @@ It's difficult to map all operations into a single category since operations can
 
 This operation merges multiple fields into a single output field. There are two methods:
 
-1. **Stack**: Creates a new dimension and stacks fields along it. For example, stacking `f_dc_0`, `f_dc_1`, and `f_dc_2` into `f_dc [N x 3]`. 
+1. **Stack**: Creates a new dimension and stacks fields along it. For example, stacking `f_dc_0`, `f_dc_1`, and `f_dc_2` into `f_dc [N x 3]`.
 
 2. **Concat**: Combines fields along an existing dimension. For example, concatenating `f_dc [N x 1 x 3]` and `f_rest [N x 15 x 3]` into `sh [N x 16 x 3]`.
 
 Input fields can be specified in two ways:
+
 - As a list of names: `from_field_list: [f_dc, f_rest]`
 - Using a prefix: `from_fields_with_prefix: point_cloud.ply@f_rest_`
 
@@ -187,7 +190,7 @@ reshape:
 This operation copies data from another named field for further processing:
 
 ```yaml
-opacities: 
+opacities:
   - from_field: point_cloud.ply@opacity
   - remapping:
       method: sigmoid
@@ -248,7 +251,7 @@ The 3DGS pipeline can be viewed from different perspectives:
 ### Encoding Pipeline
 
 1. **Input**: Final trained buffers are processed with the training forward pass
-2. **Encoding**: Novel encoding algorithms produce optimized buffers/indices 
+2. **Encoding**: Novel encoding algorithms produce optimized buffers/indices
 3. **Storage**: The encoded files are stored with metadata
 
 ### Decoding Pipeline
@@ -308,7 +311,7 @@ fields:
         dim: 1
     - reshape:
         shape: [-1, 1, 3]
-  
+
   f_rest:
     - combine:
         from_fields_with_prefix: point_cloud.ply@f_rest_
@@ -319,7 +322,7 @@ fields:
 
   sh:
     - combine:
-        from_field_list: [f_dc, f_rest]  
+        from_field_list: [f_dc, f_rest]
         method: concat
         dim: 1
 
@@ -331,10 +334,11 @@ fields:
 
   means:
     - combine:
-        from_field_list: [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
+        from_field_list:
+          [point_cloud.ply@x, point_cloud.ply@y, point_cloud.ply@z]
         method: stack
         dim: 1
-  
+
   scales:
     - combine:
         from_fields_with_prefix: point_cloud.ply@scale_
@@ -342,8 +346,8 @@ fields:
         dim: 1
     - remapping:
         method: exp
-  
-  opacities: 
+
+  opacities:
     - from_field: point_cloud.ply@opacity
     - remapping:
         method: sigmoid
@@ -370,6 +374,7 @@ The format can be extended to support other radiance field representations:
 ### Other Primitives
 
 While the initial focus is on 3DGS, the format could be extended to support:
+
 - 2D Gaussians
 - Radiant Foam
 - Neural representations (NeRF variants), Instant-NGP
@@ -378,6 +383,7 @@ While the initial focus is on 3DGS, the format could be extended to support:
 ### Schema Validation
 
 A schema system will allow:
+
 - Validation of container metadata
 - Feature detection for decoders
 - Standardized extensions

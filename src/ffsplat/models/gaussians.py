@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from ..models.fields import Field
+from ..models.fields import Field, FieldDict
 
 
 def attr_tensor_str(data: Tensor, num_primitives: int | None = None) -> str:
@@ -68,14 +68,15 @@ class Gaussians:
         # So num_coeffs = shape[1], and we solve for degree
         return int(math.sqrt(self.sh.data.shape[1]) - 1)
 
-    def to_field_dict(self) -> dict:
-        return {
-            "means": self.means,
-            "quaternions": self.quaternions,
-            "scales": self.scales,
-            "opacities": self.opacities,
-            "sh": self.sh,
-        }
+    def to_field_dict(self) -> FieldDict:
+        """Return a dictionary of copies of the fields."""
+        return FieldDict({
+            "means": self.means.copy(),
+            "quaternions": self.quaternions.copy(),
+            "scales": self.scales.copy(),
+            "opacities": self.opacities.copy(),
+            "sh": self.sh.copy(),
+        })
 
     def to_dict(self) -> dict:
         return {

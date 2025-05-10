@@ -10,136 +10,178 @@ scene:
     - quaternions
     - sh
 
-fields:
-  means:
-    - remapping:
-        method: signed-log
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 65535
-        dim: 2
-    - to_dtype:
-        dtype: uint16
-        round_to_int: true
-    - split_bytes:
-        to_fields_with_prefix: means_bytes_
-        num_bytes: 2
+ops:
+  - input_fields: [means]
+    transforms:
+      - remapping:
+          method: signed-log
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 65535
+          dim: 2
+      - to_dtype:
+          dtype: uint16
+          round_to_int: true
+      - split_bytes:
+          num_bytes: 2
+          to_fields_with_prefix: means_bytes_
 
-  sh:
-    - split:
-        to_field_list: [f_dc]
-        split_size_or_sections: [1]
-        dim: 1
-        squeeze: false
+  - input_fields: [sh]
+    transforms:
+      - split:
+          split_size_or_sections: [1]
+          dim: 1
+          squeeze: false
+          to_field_list: [f_dc]
 
-  _:
-    - plas:
-        prune_by: opacities
-        scaling_fn: standardize
-        # activated: true
-        shuffle: true
-        improvement_break: 1e-4
-        # improvement_break: 0.1
-        weights:
-          means_bytes_0: 0.1
-          means_bytes_1: 1.0
-          f_dc: 1.0
-          opacities: 0.0
-          scales: 1.0
-          quaternions: 0.0
-    - to_tmp_field: sorted_indices
+  - input_fields:
+      [means_bytes_0, means_bytes_1, f_dc, opacities, scales, quaternions]
+    transforms:
+      - plas:
+          prune_by: opacities
+          scaling_fn: standardize
+          # activated: true
+          shuffle: true
+          improvement_break: 1e-4
+          # improvement_break: 0.1
+          to_field: sorted_indices
+          weights:
+            means_bytes_0: 0.1
+            means_bytes_1: 1.0
+            f_dc: 1.0
+            opacities: 0.0
+            scales: 1.0
+            quaternions: 0.0
 
-  means_bytes_0:
-    - reindex:
-        index_field: sorted_indices
+  - input_fields: [means_bytes_0, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: means_bytes_0
+          index_field: sorted_indices
 
-  means_bytes_1:
-    - reindex:
-        index_field: sorted_indices
+  - input_fields: [means_bytes_1, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: means_bytes_1
+          index_field: sorted_indices
 
-  f_dc:
-    - flatten:
-        start_dim: 1
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: channelwise-minmax
-        min: 0.0
-        max: 255.0
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [f_dc]
+    transforms:
+      - flatten:
+          start_dim: 1
+      - remapping:
+          method: channelwise-minmax
+          min: 0.0
+          max: 255.0
+          dim: 1
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
 
-  quaternions:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 63
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [f_dc, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: f_dc
+          index_field: sorted_indices
 
-  scales:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: log
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 63
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [quaternions, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: quaternions
+          index_field: sorted_indices
 
-  opacities:
-    - reindex:
-        index_field: sorted_indices
-    - remapping:
-        method: inverse-sigmoid
-    - remapping:
-        method: channelwise-minmax
-        min: 0
-        max: 63
-        dim: 2
-    - to_dtype:
-        dtype: uint8
-        round_to_int: true
+  - input_fields: [quaternions]
+    transforms:
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 63
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
 
-files:
-  - from_field: opacities
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 0
-      matrix_coefficients: 0
-  - from_field: scales
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 444
-      matrix_coefficients: 0
-  - from_fields_with_prefix: means_bytes_
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 444
-      matrix_coefficients: 0
-  - from_field: quaternions
-    type: avif
-    coding_params:
-      quality: -1
-      chroma: 444
-      matrix_coefficients: 0
-  - from_field: f_dc
-    type: avif
-    coding_params:
-      quality: 100
-      chroma: 420
-      matrix_coefficients: 1
+  - input_fields: [scales, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: scales
+          index_field: sorted_indices
+
+  - input_fields: [scales]
+    transforms:
+      - remapping:
+          method: log
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 63
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: opacities
+          index_field: sorted_indices
+
+  - input_fields: [opacities]
+    transforms:
+      - remapping:
+          method: inverse-sigmoid
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 63
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 0
+            matrix_coefficients: 0
+
+  - input_fields: [scales]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 444
+            matrix_coefficients: 0
+
+  - input_fields:
+      from_fields_with_prefix: means_bytes_
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 444
+            matrix_coefficients: 0
+
+  - input_fields: [quaternions]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: -1
+            chroma: 444
+            matrix_coefficients: 0
+
+  - input_fields: [f_dc]
+    transforms:
+      - write_file:
+          type: avif
+          coding_params:
+            quality: 100
+            chroma: 420
+            matrix_coefficients: 1

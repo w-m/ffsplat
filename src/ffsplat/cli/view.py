@@ -54,11 +54,11 @@ def render_fn(
 # Create render function with bound parameters
 def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
     return render_fn(
-        gaussians.means,
-        gaussians.quaternions,
-        gaussians.scales,
-        gaussians.opacities,
-        gaussians.sh,
+        gaussians.means.data,
+        gaussians.quaternions.data,
+        gaussians.scales.data,
+        gaussians.opacities.data,
+        gaussians.sh.data,
         gaussians.sh_degree,
         camera_state,
         img_wh,

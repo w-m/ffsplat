@@ -26,7 +26,13 @@ from ..datasets.dataset import Dataset
 from ..render.viewer import CameraState, Viewer
 
 # TODO: this is a duplicate with the viewer
-encoding_formats: list[str] = ["3DGS_INRIA_ply", "SOG-web"]  # available formats
+encoding_formats: list[str] = [
+    "3DGS_INRIA_ply",
+    "3DGS_INRIA_nosh_ply",
+    "SOG-web",
+    "SOG-web-nosh",
+    "SOG-web-sh-split",
+]  # available formats
 
 operations: dict[str, list[str]] = {
     "remapping": ["inverse-sigmoid", "log", "channelwise-minmax", "signed-log"]
@@ -119,7 +125,9 @@ class InteractiveConversionTool:
         self.verbose = verbose
 
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
-        self.gaussians = self.input_gaussians.to("cuda")
+        self.input_gaussians = self.input_gaussians.to("cuda")
+
+        self.gaussians = self.input_gaussians
 
         self.server = viser.ViserServer(verbose=False)
         self.viewer = Viewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
@@ -177,6 +185,7 @@ class InteractiveConversionTool:
     def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
         description = "**Template**  \n"
         description += f"{output_format}  \n"
+        return description
         for field_name, field_operations in encoding_params.fields.items():
             for field_operation in field_operations:
                 for operation, _ in operations.items():
@@ -249,6 +258,8 @@ class InteractiveConversionTool:
         self.encoding_handler = {}
         output_format = self.viewer._output_dropdown.value
         self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+        # remove this return when refactoring this function. see line 240
+        return
 
         # TODO: why is this in this with block?
         with self.viewer.convert_folder:
@@ -312,7 +323,7 @@ class InteractiveConversionTool:
         stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
         stats.update({
             "elapsed_time": elapsed_time,
-            "num_GS": len(self.gaussians.means),
+            "num_GS": len(self.gaussians.means.data),
             "size": size,
         })
         self.scenes[scene_id].scene_metrics = stats

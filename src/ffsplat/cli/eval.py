@@ -31,13 +31,13 @@ def rasterize_splats(
     masks: Tensor | None = None,
     use_white_background: bool = False,
 ) -> tuple[Tensor, Tensor, dict]:
-    colors = gaussians.sh
+    colors = gaussians.sh.data
     background = torch.ones(1, colors.shape[-1], device="cuda") if use_white_background else None
     render_colors, render_alphas, info = rasterization(
-        means=gaussians.means,
-        quats=gaussians.quaternions,
-        scales=gaussians.scales,
-        opacities=gaussians.opacities,
+        means=gaussians.means.data,
+        quats=gaussians.quaternions.data,
+        scales=gaussians.scales.data,
+        opacities=gaussians.opacities.data,
         colors=colors,
         viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
         Ks=Ks,  # [C, 3, 3]
@@ -143,7 +143,7 @@ def evaluation(gaussians: Gaussians, valset: Dataset, data_path: Path, results_p
     stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
     stats.update({
         "elapsed_time": elapsed_time,
-        "num_GS": len(gaussians.means),
+        "num_GS": len(gaussians.means.data),
         "size": size,
     })
     print(
