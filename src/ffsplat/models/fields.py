@@ -27,8 +27,8 @@ class Field:
         return self.to_json() == value.to_json() if isinstance(value, Field) else False
 
     def copy(self) -> "Field":
-        """Return a copy of the field."""
-        return Field(self.data.clone(), self.op)
+        """Return a copy of the field"""
+        return Field(self.data.detach().clone(), self.op)
 
     @classmethod
     def from_file(cls, data: Tensor, file_path: Path, field_name: str) -> "Field":
