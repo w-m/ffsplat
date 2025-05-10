@@ -54,7 +54,8 @@ def process_operation(
     verbose: bool = False,
 ) -> dict[str, Field]:
     """Process the operation and return the new fields and decoding updates."""
-    print("Cache miss")
+    if verbose:
+        print(f"Decoding {op}...")
     return op.apply(verbose=verbose)[0]
 
 
@@ -64,13 +65,13 @@ class SceneDecoder:
     fields: FieldDict = field(default_factory=FieldDict)
     scene: Gaussians = field(init=False)
 
-    def _process_fields(self) -> None:
+    def _process_fields(self, verbose: bool = False) -> None:
         for op_params in self.decoding_params.ops:
             # build each operation and process it
             input_fields_params = op_params["input_fields"]
             for transform_param in op_params["transforms"]:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields)
-                new_fields = process_operation(op)
+                new_fields = process_operation(op, verbose=verbose)
                 self.fields.update(new_fields)
 
     def _create_scene(self) -> None:
@@ -87,7 +88,7 @@ class SceneDecoder:
                 raise ValueError("Unsupported scene format")
 
     def decode(self, verbose: bool) -> None:
-        self._process_fields()
+        self._process_fields(verbose=verbose)
         if verbose:
             self.fields.print_field_stats()
         self._create_scene()

@@ -128,7 +128,8 @@ def process_operation(
     verbose: bool,
 ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
     """Process the operation and return the new fields and decoding updates."""
-    print("Cache miss")
+    if verbose:
+        print(f"Encoding {op}...")
     return op.apply(verbose=verbose)
 
 

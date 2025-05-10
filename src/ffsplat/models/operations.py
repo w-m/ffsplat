@@ -55,6 +55,10 @@ class Operation:
     def __eq__(self, value: object, /) -> bool:
         return self.to_json() == value.to_json() if isinstance(value, Operation) else False
 
+    def __str__(self) -> str:
+        """Return a compact string representation of the operation."""
+        return f"Operation(type={self.transform_type}, inputs={list(self.input_fields.keys())})"
+
     def to_json(self) -> dict[str, Any]:
         """Convert the operation to a JSON-serializable format."""
         return {
