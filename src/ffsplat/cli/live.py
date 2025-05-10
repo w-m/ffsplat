@@ -125,7 +125,9 @@ class InteractiveConversionTool:
         self.verbose = verbose
 
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
-        self.gaussians = self.input_gaussians.to("cuda")
+        self.input_gaussians = self.input_gaussians.to("cuda")
+
+        self.gaussians = self.input_gaussians
 
         self.server = viser.ViserServer(verbose=False)
         self.viewer = Viewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
