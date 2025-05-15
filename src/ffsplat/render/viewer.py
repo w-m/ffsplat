@@ -2,7 +2,9 @@
 
 
 import dataclasses
+import tempfile
 import time
+from pathlib import Path
 from threading import Lock
 from typing import Callable, Literal, Optional, Union
 
@@ -213,6 +215,13 @@ class Viewer:
         self.tab_group = self.server.gui.add_tab_group()
         self.scenes_folder = self.tab_group.add_tab("Scenes")
 
+        # Output path text field lives in Scenes tab so it is visible when
+        # loading/saving scenes.
+        with self.scenes_folder:
+            self._output_path_text = self.server.gui.add_text(
+                "Output path", initial_value=str(Path(tempfile.mkdtemp(prefix="ffsplat_convert_")))
+            )
+
     def add_eval(self, eval_fn: Callable):
         with self.tab_group.add_tab("Evaluation") as self.eval_folder:
             self.eval_button = self.server.gui.add_button("Run evaluation")
@@ -227,8 +236,9 @@ class Viewer:
         with self.tab_group.add_tab("Convert") as self.convert_folder:
             self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
             self._output_dropdown.on_update(build_convert_options_fn)
-            self._save_button = self.server.gui.add_button("Save")
-            self._save_button.on_click(save_fn)
+
+            self._convert_button = self.server.gui.add_button("Add Scene")
+            self._convert_button.on_click(save_fn)
         build_convert_options_fn(None)
 
     def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable):

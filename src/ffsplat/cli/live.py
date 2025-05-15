@@ -150,6 +150,10 @@ class InteractiveConversionTool:
             self.viewer.add_eval(self.full_evaluation)
 
         self.viewer.add_convert(self._build_convert_options, self.save_scene)
+
+        # Set initial output path to temporary directory.
+        if hasattr(self.viewer, "_output_path_text"):
+            self.viewer._output_path_text.value = str(Path(self.temp_dir.name) / "gaussians")
         self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
@@ -186,8 +190,29 @@ class InteractiveConversionTool:
     def save_scene(self, _):
         # Save the current preview as a new scene
         print("Saving current preview as a new scene...")
-        output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
-        shutil.copytree(Path(self.temp_dir.name + "/preview"), output_path, dirs_exist_ok=True)
+        # Determine output path from viewer text field; fallback to tmp dir.
+        try:
+            raw_path = self.viewer._output_path_text.value  # type: ignore[attr-defined]
+            output_path = Path(raw_path).expanduser().resolve()
+        except Exception:
+            output_path = Path(self.temp_dir.name) / f"gaussians{len(self.scenes)}"
+
+        # Prevent accidental self-copies that would lead to endless recursion.
+        preview_path = Path(self.temp_dir.name) / "preview"
+
+        try:
+            if output_path.resolve().is_relative_to(preview_path.resolve()):
+                raise ValueError(
+                    "The chosen output path resides inside the preview folder. " "Please pick a different location."
+                ) from None
+        except AttributeError:
+            if str(output_path.resolve()).startswith(str(preview_path.resolve())):
+                raise ValueError(
+                    "The chosen output path resides inside the preview folder. " "Please pick a different location."
+                ) from None
+
+        output_path.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(preview_path, output_path, dirs_exist_ok=True)
         output_format = self.viewer._output_dropdown.value
         desc = (
             self._build_description(self.encoding_params, output_format)
@@ -217,12 +242,66 @@ class InteractiveConversionTool:
 
     def _save_scene(self, scene_id):
         print(f"Saving scene {scene_id}...")
-        if self.results_path is None:
-            print("No results path specified. Cannot save scene.")
-            return
-        scene_path = self.results_path / Path(f"scene_{scene_id}/data")
-        if not os.path.exists(scene_path):
-            os.makedirs(scene_path)
+        target_root = self.results_path
+        if target_root is None:
+            # Fallback to path specified in UI.
+            try:
+                raw = self.viewer._output_path_text.value  # type: ignore[attr-defined]
+                target_root = Path(raw).expanduser().resolve()
+            except Exception:
+                print("No results path specified and UI output path missing.")
+                return
+
+        # NOTE: ``shutil.copytree`` will recurse indefinitely (until hitting the
+        # path length limit) if the destination directory lies *inside* the
+        # source directory.  This can easily happen here when the user did not
+        # specify a dedicated ``results_path``.  In that case we fall back to
+        # the value entered in the UI which, by default, is the very folder we
+        # just wrote the scene to (see ``save_scene``).  The resulting layout
+        # is therefore
+        #
+        #   src = <root>/gaussians
+        #   dst = <root>/gaussians/scene_<id>/data
+        #
+        # and ``copytree`` starts copying the newly-created ``scene_<id>``
+        # directory again and again.
+        #
+        # To avoid this, detect the *destination is contained in the source*
+        # case and move the destination out of the source tree.
+
+        scene_path = target_root / f"scene_{scene_id}" / "data"
+
+        try:
+            # ``Path.is_relative_to`` is available from Python 3.9.
+            if scene_path.resolve().is_relative_to(self.scenes[scene_id].data_path.resolve()):
+                print(
+                    "[ffsplat] Requested save location is inside the source "
+                    "scene directory - adjusting to avoid infinite recursion."
+                )
+                # Move the export next to the source directory.
+                # Move the entire ``scene_<id>`` directory next to the source
+                # directory to avoid nesting.  Keep the trailing ``/data``
+                # folder so that the exported layout matches the expected
+                # structure.
+                scene_root = (
+                    self.scenes[scene_id].data_path.parent / f"{self.scenes[scene_id].data_path.name}_scene_{scene_id}"
+                )
+                scene_path = scene_root / "data"
+        except AttributeError:
+            # For Python <3.9 fallback to manual check.
+            src_path = self.scenes[scene_id].data_path.resolve()
+            dst_path = scene_path.resolve()
+            if str(dst_path).startswith(str(src_path)):
+                print(
+                    "[ffsplat] Requested save location is inside the source "
+                    "scene directory - adjusting to avoid infinite recursion."
+                )
+                scene_root = src_path.parent / f"{src_path.name}_scene_{scene_id}"
+                scene_path = scene_root / "data"
+
+        # Finally perform the copy.
+        if not scene_path.exists():
+            scene_path.mkdir(parents=True, exist_ok=True)
         shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
 
     def _load_scene(self, scene_id):
