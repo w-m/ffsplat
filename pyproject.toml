@@ -55,8 +55,7 @@ torchvision = [
 camorph = { git = "https://github.com/Fraunhofer-IIS/camorph" }
 plas = { git = "https://github.com/fraunhoferhhi/PLAS.git" }
 # newest release does not support html elements. Use a commit that does. This can be changed with the next release.
-viser = { git = "https://github.com/nerfstudio-project/viser.git" , rev = "0cb94054b29028a012aeeba11b00a5477b09a2fa"}
-
+viser = { path = "extern/viser", editable = true }
 
 [project.urls]
 Homepage = "https://w-m.github.io/ffsplat/"
@@ -93,7 +92,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.mypy]
 files = ["src"]
-exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*"]
+exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*", "extern/viser/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -163,6 +162,9 @@ ignore = [
 
 [tool.ruff.format]
 preview = true
+
+[tool.deptry]
+extend_exclude = ["extern/viser"]
 
 [tool.deptry.per_rule_ignores]
 # cupy required for kmeans in torchpq, but we don't import it explicitly in the code base
