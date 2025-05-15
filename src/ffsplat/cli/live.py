@@ -63,7 +63,7 @@ class SceneData:
     description: str
     data_path: Path
     input_format: str
-    scene_metrics: dict[str, float | int] = None
+    scene_metrics: dict[str, float | int] | None = None
     # encoding_params: EncodingParams | None
     # gaussians: Tensor
 
@@ -119,11 +119,13 @@ class InteractiveConversionTool:
         self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path, verbose: bool = False
     ):
         self.scenes: list[SceneData] = []
-        self.dataset: Path = dataset_path
+        self.dataset = None
         self.results_path: Path = results_path
         self.current_scene = 0
         self.verbose = verbose
 
+        self.input_path = input_path
+        self.input_format = input_format
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
         self.input_gaussians = self.input_gaussians.to("cuda")
 
@@ -133,28 +135,33 @@ class InteractiveConversionTool:
         self.viewer = Viewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
 
         if dataset_path is not None:
-            colmap_path = os.path.join(dataset_path, "sparse/0/")
+            colmap_path = os.path.join(str(dataset_path), "sparse/0/")
             if not os.path.exists(colmap_path):
-                colmap_path = os.path.join(dataset_path, "sparse")
+                colmap_path = os.path.join(str(dataset_path), "sparse")
             if os.path.exists(colmap_path):
-                dataparser = ColmapParser(dataset_path)
-            elif os.path.exists(os.path.join(dataset_path, "transforms_train.json")):
-                dataparser = BlenderParser(dataset_path)
+                dataparser = ColmapParser(str(dataset_path))
+            elif os.path.exists(os.path.join(str(dataset_path), "transforms_train.json")):
+                dataparser = BlenderParser(str(dataset_path))
             else:
                 raise ValueError("could not identify type of dataset")
 
+            # Use our Dataset class directly (it implements __len__ and __getitem__)
             self.dataset = Dataset(dataparser)
             self.viewer.add_eval(self.full_evaluation)
 
-        self.viewer.add_convert(self._build_convert_options, self.convert)
+        self.viewer.add_convert(self._build_convert_options, self.save_scene)
         self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
 
-    def convert(self, _):
-        print("Converting scene...")
+    def apply_current_settings(self, _):
+        # Always start from the original input scene and apply current settings
+        print("Applying current settings to preview...")
         encoding_params = self.encoding_params
-        output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
+        if encoding_params is None:
+            print("No encoding params set, skipping preview update.")
+            return
+        output_path = Path(self.temp_dir.name + "/preview")
 
         encoder = SceneEncoder(
             encoding_params=encoding_params,
@@ -171,9 +178,23 @@ class InteractiveConversionTool:
         )
         encoder.encode(verbose=self.verbose)
 
-        # add scene to scene list and load it to view the scene
+        # Update the current preview (not adding to scenes list)
+        self.gaussians = decode_gaussians(output_path, input_format="smurfx", verbose=self.verbose).to("cuda")
+        self.deactivate_convert_preview()
+        self.viewer.rerender(None)
+
+    def save_scene(self, _):
+        # Save the current preview as a new scene
+        print("Saving current preview as a new scene...")
+        output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
+        shutil.copytree(Path(self.temp_dir.name + "/preview"), output_path, dirs_exist_ok=True)
         output_format = self.viewer._output_dropdown.value
-        self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
+        desc = (
+            self._build_description(self.encoding_params, output_format)
+            if self.encoding_params is not None
+            else output_format
+        )
+        self._add_scene(desc, output_path, "smurfx")
 
     def _add_scene(self, description, data_path, input_format):
         self.scenes.append(
@@ -234,8 +255,9 @@ class InteractiveConversionTool:
                 self.viewer.eval_progress.value = 0
                 self._load_scene(scene.id)
                 self._eval(scene.id)
-            self.table_rows += get_table_row(scene.id, scene.scene_metrics)
-            self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
+            if scene.scene_metrics is not None:
+                self.table_rows += get_table_row(scene.id, scene.scene_metrics)
+        self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
         self.viewer.eval_info.visible = False
         self.viewer.eval_progress.visible = False
         self.viewer.eval_button.disabled = False
@@ -258,7 +280,8 @@ class InteractiveConversionTool:
         self.encoding_handler = {}
         output_format = self.viewer._output_dropdown.value
         self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
-        # remove this return when refactoring this function. see line 240
+        # Immediately apply settings to preview
+        self.apply_current_settings(None)
         return
 
         # TODO: why is this in this with block?
@@ -288,6 +311,9 @@ class InteractiveConversionTool:
 
     def _eval(self, scene_id):
         print("Running evaluation...")
+        if self.dataset is None:
+            print("No dataset loaded, skipping evaluation.")
+            return
         device = "cuda"
         ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
         psnr = PeakSignalNoiseRatio(data_range=1.0).to(device)
@@ -304,7 +330,7 @@ class InteractiveConversionTool:
         for i, data in enumerate(valloader):
             elapsed_time += eval_step(
                 self.gaussians,
-                self.dataset.white_background,
+                getattr(self.dataset, "white_background", False),
                 imgs_path,
                 device,
                 i,
