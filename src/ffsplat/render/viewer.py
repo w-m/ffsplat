@@ -144,6 +144,73 @@ class Viewer:
                 "Render Format:", ["png", "jpeg"], initial_value="jpeg"
             )
             self.render_quality_dropdown.on_update(self.rerender)
+
+        # ------------------------------------------------------------------
+        # Stdout viewer - collapsible folder showing recent console output.
+        # ------------------------------------------------------------------
+        with self.server.gui.add_folder("Stdout Logs", expand_by_default=True) as self._stdout_folder:
+            # Use a <pre> block inside a scrollable container. Keep a
+            # reference so we can update it from the stdout redirector.
+            self._stdout_html = self.server.gui.add_html(
+                "<pre style='white-space:pre-wrap;font-family:monospace;margin:0'></pre>"
+            )
+
+        # Hook Python stdout/stderr so new prints appear in the GUI.
+        # We keep the original streams so behaviour in the terminal is
+        # unchanged.
+        import io
+        import sys
+        from collections import deque
+
+        class _GuiStdout(io.TextIOBase):
+            """Wraps an underlying stream and mirrors the last few lines to a
+            viser HTML handle."""
+
+            def __init__(self, orig, html_handle):
+                self._orig = orig
+                self._html_handle = html_handle
+                self._buf: deque[str] = deque(maxlen=5)
+                # Access to GUI API for sending JS scroll command.
+                self._gui_api = html_handle._impl.gui_api  # type: ignore[attr-defined]
+
+            # Required TextIOBase overrides ---------------------------------
+            def write(self, text: str):  # type: ignore[override]
+                self._orig.write(text)
+
+                # If tqdm or similar writes carriage-return updates, update
+                # the last line instead of appending.
+                if "\r" in text and "\n" not in text:
+                    last = text.split("\r")[-1].rstrip()
+                    if self._buf:
+                        self._buf[-1] = last
+                    else:
+                        self._buf.append(last)
+                else:
+                    for part in text.split("\n"):
+                        if part == "":
+                            continue
+                        self._buf.append(part)
+
+                self._refresh_html()
+                return len(text)
+
+            def flush(self):  # type: ignore[override]
+                self._orig.flush()
+
+            # Internal ------------------------------------------------------
+            def _refresh_html(self):
+                content = (
+                    "<pre style='white-space:pre-wrap;font-family:monospace;margin:0'>"
+                    + "\n".join(self._buf)
+                    + "</pre>"
+                )
+                self._html_handle.content = content
+
+        # Redirect once.
+        if not isinstance(sys.stdout, _GuiStdout):
+            gui_stream = _GuiStdout(sys.stdout, self._stdout_html)
+            sys.stdout = gui_stream  # type: ignore[assignment]
+            sys.stderr = gui_stream  # mirror stderr as well.
         self.tab_group = self.server.gui.add_tab_group()
 
     def add_scenes(self, results_path: Path):
