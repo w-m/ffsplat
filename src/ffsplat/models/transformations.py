@@ -79,6 +79,11 @@ class Transformation(ABC):
         Transformations that are only available for decoding do return empty decoding updates"""
         pass
 
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for the transformation."""
+        return []
+
 
 class Cluster(Transformation):
     @staticmethod
@@ -681,6 +686,55 @@ class PLAS(Transformation):
 
         return new_fields, []
 
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for the transformation."""
+        # TODO: get initial values and check for none
+        field_names = list(params["weights"].keys())
+        scaling_functions = ["standardize", "minmax", "none"]
+
+        dynamic_params_config = []
+        dynamic_params_config.append({
+            "label": "prune_by",
+            "type": "dropdown",
+            "values": field_names,
+        })
+        dynamic_params_config.append({
+            "label": "scaling_fn",
+            "type": "dropdown",
+            "values": scaling_functions,
+        })
+        dynamic_params_config.append({
+            "label": "shuffle",
+            "type": "bool",
+        })
+        dynamic_params_config.append({
+            "label": "improvement_break",
+            "type": "number",
+            "min": 0,
+            "max": 0.001,
+            "step": 0.0001,
+            "int_or_float": "float",
+        })
+
+        weight_config = []
+        for field_name in field_names:
+            weight_config.append({
+                "label": field_name,
+                "type": "number",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "int_or_float": "float",
+            })
+        dynamic_params_config.append({
+            "label": "weights",
+            "type": "heading",
+            "params": weight_config,
+        })
+
+        return dynamic_params_config
+
 
 class Combine(Transformation):
     @staticmethod
@@ -847,3 +901,12 @@ def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Fi
     if transformation is None:
         raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
     return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose)
+
+
+def get_dynamic_params(params: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Get the dynamic parameters for a given transformation type."""
+    transform_type = next(iter(params.keys()))
+    transformation = transformation_map.get(transform_type)
+    if transformation is None:
+        raise ValueError(f"Unknown transformation: {transform_type}")
+    return transformation.get_dynamic_params(params[transform_type])

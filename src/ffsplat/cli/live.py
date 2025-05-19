@@ -23,20 +23,8 @@ from ..coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
 from ..datasets.blenderparser import BlenderParser
 from ..datasets.colmapparser import ColmapParser
 from ..datasets.dataset import Dataset
+from ..models.transformations import get_dynamic_params
 from ..render.viewer import CameraState, Viewer
-
-# TODO: this is a duplicate with the viewer
-encoding_formats: list[str] = [
-    "3DGS_INRIA_ply",
-    "3DGS_INRIA_nosh_ply",
-    "SOG-web",
-    "SOG-web-nosh",
-    "SOG-web-sh-split",
-]  # available formats
-
-operations: dict[str, list[str]] = {
-    "remapping": ["inverse-sigmoid", "log", "channelwise-minmax", "signed-log"]
-}  # methods for each operation
 
 
 def create_update_field(dict_to_update: dict[str, Any], key: str):
@@ -146,7 +134,7 @@ class InteractiveConversionTool:
             self.dataset = Dataset(dataparser)
             self.viewer.add_eval(self.full_evaluation)
 
-        self.viewer.add_convert(self._build_convert_options, self.convert)
+        self.viewer.add_convert(self._build_convert_options, self.convert, self._load_encoding_params)
         self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
@@ -185,13 +173,6 @@ class InteractiveConversionTool:
     def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
         description = "**Template**  \n"
         description += f"{output_format}  \n"
-        return description
-        for field_name, field_operations in encoding_params.fields.items():
-            for field_operation in field_operations:
-                for operation, _ in operations.items():
-                    if operation in field_operation:
-                        description += f" **{field_name}**  \n"
-                        description += f"  {operation}: {field_operation[operation]['method']}  \n"
         return description
 
     def _save_scene(self, scene_id):
@@ -245,46 +226,77 @@ class InteractiveConversionTool:
     ):
         pass
 
+    def _build_options_for_transformation(self, dynamic_params_conf, initial_values):
+        for item in dynamic_params_conf:
+            match item:
+                case {
+                    "label": label,
+                    "type": "number",
+                    "min": minimum_value,
+                    "max": maximum_value,
+                    "step": stepsize,
+                    "int_or_float": int_or_float,
+                }:
+                    if int_or_float == "int":
+                        to_type = int
+                    elif int_or_float == "float":
+                        to_type = float
+                    number_handle = self.viewer.server.gui.add_slider(
+                        label,
+                        to_type(minimum_value),
+                        to_type(maximum_value),
+                        to_type(stepsize),
+                        to_type(initial_values[label]),
+                    )
+                    number_handle.on_update(create_update_field(initial_values, label))
+                    self.viewer.convert_gui_handles.append(number_handle)
+                case {
+                    "label": label,
+                    "type": "bool",
+                }:
+                    checkbox_handle = self.viewer.server.gui.add_checkbox(label, initial_values[label])
+                    checkbox_handle.on_update(create_update_field(initial_values, label))
+                    self.viewer.convert_gui_handles.append(checkbox_handle)
+
+                case {"label": label, "type": "dropdown", "values": values}:
+                    dropdown_handle = self.viewer.server.gui.add_dropdown(label, values, initial_values[label])
+                    dropdown_handle.on_update(create_update_field(initial_values, label))
+                    self.viewer.convert_gui_handles.append(dropdown_handle)
+
+                case {
+                    "label": label,
+                    "type": "heading",
+                    "params": params_conf,
+                }:
+                    heading_handle = self.viewer.server.gui.add_markdown(f"{label}:")
+                    self._build_options_for_transformation(params_conf, initial_values[label])
+                    self.viewer.convert_gui_handles.append(heading_handle)
+
+    def _load_encoding_params(self, _):
+        output_format = self.viewer._output_dropdown.value
+        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+
     def _build_convert_options(self, _):
-        # TODO: this should be refactored once the Field and Operation classes are ready
-        # this is not a class function of the viewer to store the handles in a dict in this class. this is to separate the logic of the conversion from the viewer. this way we can store the handles and their data needed for the conversion in this class
-        # clear previous gui conversion handles
-        # TODO: should we store the handles in the viewer? or should we store them in this class?
-        # is the split between the viewer necessary at all? i did this to separate the logic of the evaluation from the viewer, but the split is not as clean as initially thought
         for handle in self.viewer.convert_gui_handles:
             handle.remove()
 
-        # load the default encoding params
-        self.encoding_handler = {}
-        output_format = self.viewer._output_dropdown.value
-        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
-        # remove this return when refactoring this function. see line 240
-        return
+        self.viewer.convert_gui_handles = []
 
-        # TODO: why is this in this with block?
         with self.viewer.convert_folder:
-            self.viewer.convert_gui_handles = []
+            for operation in self.encoding_params.ops:
+                # list input fields
+                for transformation in operation["transforms"]:
+                    # get list with customizable options
 
-            for field_name, field_operations in self.encoding_params.fields.items():
-                with self.viewer.server.gui.add_folder(field_name) as field_folder:
-                    field_is_customizable = False
-                    for idx, field_operation in enumerate(field_operations):
-                        for operation, operation_options in operations.items():
-                            if operation in field_operation:
-                                field_is_customizable = True
-                                dropdown_handle = self.viewer.server.gui.add_dropdown(
-                                    operation, operation_options, field_operation[operation]["method"]
-                                )
-                                dropdown_handle.on_update(
-                                    create_update_field(
-                                        self.encoding_params.fields[field_name][idx][operation], "method"
-                                    )
-                                )
+                    dynamic_transform_conf = get_dynamic_params(transformation)
+                    if len(dynamic_transform_conf) == 0:
+                        continue
+                    transform_type = next(iter(transformation.keys()))
+                    desc_handle = self.viewer.server.gui.add_markdown(f"""### {transform_type}
+                    input fields: {operation["input_fields"]}""")
+                    self.viewer.convert_gui_handles.append(desc_handle)
 
-                    if not field_is_customizable:
-                        field_folder.remove()
-                    else:
-                        self.viewer.convert_gui_handles.append(field_folder)
+                    self._build_options_for_transformation(dynamic_transform_conf, transformation[transform_type])
 
     def _eval(self, scene_id):
         print("Running evaluation...")
