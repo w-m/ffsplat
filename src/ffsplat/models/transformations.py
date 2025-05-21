@@ -127,6 +127,26 @@ class Cluster(Transformation):
                 raise ValueError(f"Unknown clustering method: {params['method']}")
         return new_fields, decoding_update
 
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for the transformation."""
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "num_clusters",
+            "type": "number",
+            "min": 0,
+            "max": 2**13,
+            "step": 1,
+            "int_or_float": "int",
+        })
+        dynamic_params_config.append({
+            "label": "distance",
+            "type": "dropdown",
+            "values": ["euclidean", "cosine", "manhatten"],
+        })
+
+        return dynamic_params_config
+
 
 class Split(Transformation):
     @staticmethod
