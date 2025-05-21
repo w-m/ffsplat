@@ -3,6 +3,7 @@
 
 import dataclasses
 import time
+from pathlib import Path
 from threading import Lock
 from typing import Callable, Literal, Optional, Union
 
@@ -144,7 +145,13 @@ class Viewer:
             )
             self.render_quality_dropdown.on_update(self.rerender)
         self.tab_group = self.server.gui.add_tab_group()
+
+    def add_scenes(self, results_path: Path):
         self.scenes_tab = self.tab_group.add_tab("Scenes")
+        with self.scenes_tab:
+            if results_path is None:
+                results_path = Path("./results")
+            self.results_path_input = self.server.gui.add_text("store at:", results_path.as_posix())
 
     def add_eval(self, eval_fn: Callable):
         with self.tab_group.add_tab("Evaluation") as self.eval_tab:
@@ -174,6 +181,7 @@ class Viewer:
             self.load_buttons.append(load_button)
 
     def add_test_functionality(self, test_fn: Callable):
+        """This function is for development only. Adds a button to run a new function."""
         with self.server.gui.add_folder("Test") as self.test_folder:
             self._test_button = self.server.gui.add_button("Run test")
             self._test_button.on_click(test_fn)

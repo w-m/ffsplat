@@ -108,7 +108,6 @@ class InteractiveConversionTool:
     ):
         self.scenes: list[SceneData] = []
         self.dataset: Path = dataset_path
-        self.results_path: Path = results_path
         self.current_scene = 0
         self.verbose = verbose
 
@@ -119,6 +118,8 @@ class InteractiveConversionTool:
 
         self.server = viser.ViserServer(verbose=False)
         self.viewer = Viewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
+
+        self.viewer.add_scenes(results_path)
 
         if dataset_path is not None:
             colmap_path = os.path.join(dataset_path, "sparse/0/")
@@ -135,6 +136,7 @@ class InteractiveConversionTool:
             self.viewer.add_eval(self.full_evaluation)
 
         self.viewer.add_convert(self.reset_dynamic_params_gui, self.convert)
+
         self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
@@ -177,10 +179,7 @@ class InteractiveConversionTool:
 
     def _save_scene(self, scene_id):
         print(f"Saving scene {scene_id}...")
-        if self.results_path is None:
-            print("No results path specified. Cannot save scene.")
-            return
-        scene_path = self.results_path / Path(f"scene_{scene_id}/data")
+        scene_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/data")
         if not os.path.exists(scene_path):
             os.makedirs(scene_path)
         shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
@@ -310,9 +309,7 @@ class InteractiveConversionTool:
         elapsed_time = 0
         metrics = defaultdict(list)
 
-        imgs_path: Path | None = None
-        if self.results_path is not None:
-            imgs_path = self.results_path / Path(f"scene_{scene_id}/imgs")
+        imgs_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/imgs")
 
         for i, data in enumerate(valloader):
             elapsed_time += eval_step(
