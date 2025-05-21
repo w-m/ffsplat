@@ -693,7 +693,7 @@ class PLAS(Transformation):
         field_names = list(params["weights"].keys())
         scaling_functions = ["standardize", "minmax", "none"]
 
-        dynamic_params_config = []
+        dynamic_params_config: list[dict[str, Any]] = []
         dynamic_params_config.append({
             "label": "prune_by",
             "type": "dropdown",
@@ -717,7 +717,7 @@ class PLAS(Transformation):
             "int_or_float": "float",
         })
 
-        weight_config = []
+        weight_config: list[dict[str, Any]] = []
         for field_name in field_names:
             weight_config.append({
                 "label": field_name,
