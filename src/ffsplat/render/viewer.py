@@ -156,15 +156,13 @@ class Viewer:
             self.eval_progress.visible = False
             self.eval_table = self.server.gui.add_html("")
 
-    def add_convert(self, build_convert_options_fn: Callable, convert_fn: Callable, load_encoding_conf_fn: Callable):
+    def add_convert(self, reset_dynamic_params_gui_fn: Callable, convert_fn: Callable):
         with self.tab_group.add_tab("Convert") as self.convert_folder:
             self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
-            self._output_dropdown.on_update(load_encoding_conf_fn)
-            self._output_dropdown.on_update(build_convert_options_fn)
+            self._output_dropdown.on_update(reset_dynamic_params_gui_fn)
             self._convert_button = self.server.gui.add_button("Convert")
             self._convert_button.on_click(convert_fn)
-        load_encoding_conf_fn(None)
-        build_convert_options_fn(None)
+        reset_dynamic_params_gui_fn(None)
 
     def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable):
         with self.scenes_folder, self.server.gui.add_folder(f"Scene {scene_id}"):

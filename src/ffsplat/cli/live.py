@@ -134,7 +134,7 @@ class InteractiveConversionTool:
             self.dataset = Dataset(dataparser)
             self.viewer.add_eval(self.full_evaluation)
 
-        self.viewer.add_convert(self._build_convert_options, self.convert, self._load_encoding_params)
+        self.viewer.add_convert(self.reset_dynamic_params_gui, self.convert)
         self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
@@ -272,11 +272,15 @@ class InteractiveConversionTool:
                     self._build_options_for_transformation(params_conf, initial_values[label])
                     self.viewer.convert_gui_handles.append(heading_handle)
 
-    def _load_encoding_params(self, _):
+    def reset_dynamic_params_gui(self, _):
+        self._load_encoding_params()
+        self._build_convert_options()
+
+    def _load_encoding_params(self):
         output_format = self.viewer._output_dropdown.value
         self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
 
-    def _build_convert_options(self, _):
+    def _build_convert_options(self):
         for handle in self.viewer.convert_gui_handles:
             handle.remove()
 
