@@ -17,14 +17,14 @@ from torch import Tensor
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from ffsplat.cli.eval import eval_step, get_directory_size
-from ffsplat.coding.scene_decoder import decode_gaussians
-from ffsplat.coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
-from ffsplat.datasets.blenderparser import BlenderParser
-from ffsplat.datasets.colmapparser import ColmapParser
-from ffsplat.datasets.dataset import Dataset
-from ffsplat.models.transformations import get_dynamic_params
-from ffsplat.render.viewer import CameraState, Viewer
+from ..cli.eval import eval_step, get_directory_size
+from ..coding.scene_decoder import decode_gaussians
+from ..coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
+from ..datasets.blenderparser import BlenderParser
+from ..datasets.colmapparser import ColmapParser
+from ..datasets.dataset import Dataset
+from ..models.transformations import get_dynamic_params
+from ..render.viewer import CameraState, Viewer
 
 
 def create_update_field(dict_to_update: dict[str, Any], key: str):
@@ -283,7 +283,7 @@ class InteractiveConversionTool:
 
         self.viewer.convert_gui_handles = []
 
-        with self.viewer.convert_folder:
+        with self.viewer.convert_tab:
             for operation in self.encoding_params.ops:
                 # list input fields
                 for transformation in operation["transforms"]:

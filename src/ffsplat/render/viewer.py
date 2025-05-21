@@ -144,10 +144,10 @@ class Viewer:
             )
             self.render_quality_dropdown.on_update(self.rerender)
         self.tab_group = self.server.gui.add_tab_group()
-        self.scenes_folder = self.tab_group.add_tab("Scenes")
+        self.scenes_tab = self.tab_group.add_tab("Scenes")
 
     def add_eval(self, eval_fn: Callable):
-        with self.tab_group.add_tab("Evaluation") as self.eval_folder:
+        with self.tab_group.add_tab("Evaluation") as self.eval_tab:
             self.eval_button = self.server.gui.add_button("Run evaluation")
             self.eval_button.on_click(eval_fn)
             self.eval_info = self.server.gui.add_markdown("")
@@ -157,7 +157,7 @@ class Viewer:
             self.eval_table = self.server.gui.add_html("")
 
     def add_convert(self, reset_dynamic_params_gui_fn: Callable, convert_fn: Callable):
-        with self.tab_group.add_tab("Convert") as self.convert_folder:
+        with self.tab_group.add_tab("Convert") as self.convert_tab:
             self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
             self._output_dropdown.on_update(reset_dynamic_params_gui_fn)
             self._convert_button = self.server.gui.add_button("Convert")
@@ -165,7 +165,7 @@ class Viewer:
         reset_dynamic_params_gui_fn(None)
 
     def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable):
-        with self.scenes_folder, self.server.gui.add_folder(f"Scene {scene_id}"):
+        with self.scenes_tab, self.server.gui.add_folder(f"Scene {scene_id}"):
             self.server.gui.add_markdown(description)
             load_button = self.server.gui.add_button("Load")
             load_button.on_click(lambda _: load_fn(scene_id))
