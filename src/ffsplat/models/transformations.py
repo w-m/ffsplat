@@ -689,7 +689,9 @@ class PLAS(Transformation):
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Get the dynamic parameters for the transformation."""
-        # TODO: get initial values and check for none
+
+        if params.get("weights") is None:
+            raise ValueError(f"PLAS parameters is missing weights: {params}")
         field_names = list(params["weights"].keys())
         scaling_functions = ["standardize", "minmax", "none"]
 
