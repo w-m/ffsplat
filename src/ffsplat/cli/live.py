@@ -17,14 +17,14 @@ from torch import Tensor
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from ..cli.eval import eval_step, get_directory_size
-from ..coding.scene_decoder import decode_gaussians
-from ..coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
-from ..datasets.blenderparser import BlenderParser
-from ..datasets.colmapparser import ColmapParser
-from ..datasets.dataset import Dataset
-from ..models.transformations import get_dynamic_params
-from ..render.viewer import CameraState, Viewer
+from ffsplat.cli.eval import eval_step, get_directory_size
+from ffsplat.coding.scene_decoder import decode_gaussians
+from ffsplat.coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
+from ffsplat.datasets.blenderparser import BlenderParser
+from ffsplat.datasets.colmapparser import ColmapParser
+from ffsplat.datasets.dataset import Dataset
+from ffsplat.models.transformations import get_dynamic_params
+from ffsplat.render.viewer import CameraState, Viewer
 
 
 def create_update_field(dict_to_update: dict[str, Any], key: str):
@@ -249,28 +249,25 @@ class InteractiveConversionTool:
                         to_type(initial_values[label]),
                     )
                     number_handle.on_update(create_update_field(initial_values, label))
-                    self.viewer.convert_gui_handles.append(number_handle)
+
                 case {
                     "label": label,
                     "type": "bool",
                 }:
                     checkbox_handle = self.viewer.server.gui.add_checkbox(label, initial_values[label])
                     checkbox_handle.on_update(create_update_field(initial_values, label))
-                    self.viewer.convert_gui_handles.append(checkbox_handle)
 
                 case {"label": label, "type": "dropdown", "values": values}:
                     dropdown_handle = self.viewer.server.gui.add_dropdown(label, values, initial_values[label])
                     dropdown_handle.on_update(create_update_field(initial_values, label))
-                    self.viewer.convert_gui_handles.append(dropdown_handle)
 
                 case {
                     "label": label,
                     "type": "heading",
                     "params": params_conf,
                 }:
-                    heading_handle = self.viewer.server.gui.add_markdown(f"{label}:")
+                    self.viewer.server.gui.add_markdown(f"{label}:")
                     self._build_options_for_transformation(params_conf, initial_values[label])
-                    self.viewer.convert_gui_handles.append(heading_handle)
 
     def reset_dynamic_params_gui(self, _):
         self._load_encoding_params()
@@ -296,11 +293,11 @@ class InteractiveConversionTool:
                     if len(dynamic_transform_conf) == 0:
                         continue
                     transform_type = next(iter(transformation.keys()))
-                    desc_handle = self.viewer.server.gui.add_markdown(f"""### {transform_type}
-                    input fields: {operation["input_fields"]}""")
-                    self.viewer.convert_gui_handles.append(desc_handle)
-
-                    self._build_options_for_transformation(dynamic_transform_conf, transformation[transform_type])
+                    transform_folder = self.viewer.server.gui.add_folder(transform_type)
+                    self.viewer.convert_gui_handles.append(transform_folder)
+                    with transform_folder:
+                        self.viewer.server.gui.add_markdown(f"input fields: {operation['input_fields']}")
+                        self._build_options_for_transformation(dynamic_transform_conf, transformation[transform_type])
 
     def _eval(self, scene_id):
         print("Running evaluation...")
