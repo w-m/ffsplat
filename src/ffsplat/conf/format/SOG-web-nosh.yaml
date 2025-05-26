@@ -143,7 +143,8 @@ ops:
   - input_fields: [opacities]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 0
@@ -152,7 +153,8 @@ ops:
   - input_fields: [scales]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444
@@ -162,7 +164,8 @@ ops:
       from_fields_with_prefix: means_bytes_
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444
@@ -171,7 +174,8 @@ ops:
   - input_fields: [quaternions]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444
@@ -180,7 +184,8 @@ ops:
   - input_fields: [f_dc]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: 100
             chroma: 420

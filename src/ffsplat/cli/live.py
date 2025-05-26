@@ -5,8 +5,9 @@ import time
 from argparse import ArgumentParser
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import viser
@@ -27,9 +28,36 @@ from ..models.transformations import get_dynamic_params
 from ..render.viewer import CameraState, Viewer
 
 
-def create_update_field(dict_to_update: dict[str, Any], key: str):
+def create_update_field(
+    dict_to_update: dict[str, Any],
+    key: str,
+    rebuild_fn: Callable | None = None,
+    to_type: type | None = None,
+):
     def update_field(gui_event):
-        dict_to_update[key] = gui_event.target.value
+        if to_type:
+            dict_to_update[key] = to_type(gui_event.target.value)
+        else:
+            dict_to_update[key] = gui_event.target.value
+        if rebuild_fn:
+            rebuild_fn()
+
+    return update_field
+
+
+def create_update_field_from_bool(
+    dict_to_update: dict[str, Any],
+    key: str,
+    rebuild_fn: Callable | None = None,
+    to_values: None | list[Any] = None,
+):
+    def update_field(gui_event):
+        if to_values:
+            dict_to_update[key] = to_values[gui_event.target.value]
+        else:
+            dict_to_update[key] = gui_event.target.value
+        if rebuild_fn:
+            rebuild_fn()
 
     return update_field
 
@@ -225,7 +253,21 @@ class InteractiveConversionTool:
     ):
         pass
 
-    def _build_options_for_transformation(self, dynamic_params_conf, initial_values):
+    def _build_transform_folder(self, transform_folder, description, transformation, transform_type):
+        # clear transform folder for rebuild
+        for child in tuple(transform_folder._children.values()):
+            child.remove()
+        dynamic_params_conf = get_dynamic_params(transformation)
+        initial_values = transformation[transform_type]
+
+        with transform_folder:
+            self.viewer.server.gui.add_markdown(description)
+            rebuild_fn = partial(
+                self._build_transform_folder, transform_folder, description, transformation, transform_type
+            )
+            self._build_options_for_transformation(dynamic_params_conf, initial_values, rebuild_fn)
+
+    def _build_options_for_transformation(self, dynamic_params_conf, initial_values, rebuild_fn):  # noqa: C901
         for item in dynamic_params_conf:
             match item:
                 case {
@@ -249,16 +291,36 @@ class InteractiveConversionTool:
                     )
                     number_handle.on_update(create_update_field(initial_values, label))
 
-                case {
-                    "label": label,
-                    "type": "bool",
-                }:
-                    checkbox_handle = self.viewer.server.gui.add_checkbox(label, initial_values[label])
-                    checkbox_handle.on_update(create_update_field(initial_values, label))
+                case {"label": label, "type": "bool", **params}:
+                    key = params.get("set", label)
+                    rebuild = params.get("rebuild", False)
+                    to_values = params.get("to", None)
 
-                case {"label": label, "type": "dropdown", "values": values}:
-                    dropdown_handle = self.viewer.server.gui.add_dropdown(label, values, initial_values[label])
-                    dropdown_handle.on_update(create_update_field(initial_values, label))
+                    if to_values:
+                        checkbox_handle = self.viewer.server.gui.add_checkbox(
+                            label, to_values[1] == initial_values[key]
+                        )
+                    else:
+                        checkbox_handle = self.viewer.server.gui.add_checkbox(label, initial_values[key])
+
+                    local_rebuild_fn = rebuild_fn
+                    if rebuild:
+                        local_rebuild_fn = rebuild_fn
+
+                    checkbox_handle.on_update(
+                        create_update_field_from_bool(initial_values, key, local_rebuild_fn, to_values)
+                    )
+
+                case {"label": label, "type": "dropdown", "values": values, **params}:
+                    dropdown_handle = self.viewer.server.gui.add_dropdown(label, values, str(initial_values[label]))
+                    rebuild = params.get("rebuild", False)
+                    to_values = params.get("data_type", str)
+
+                    local_rebuild_fn = rebuild_fn
+                    if rebuild:
+                        local_rebuild_fn = rebuild_fn
+
+                    dropdown_handle.on_update(create_update_field(initial_values, label, local_rebuild_fn, to_values))
 
                 case {
                     "label": label,
@@ -266,7 +328,7 @@ class InteractiveConversionTool:
                     "params": params_conf,
                 }:
                     self.viewer.server.gui.add_markdown(f"{label}:")
-                    self._build_options_for_transformation(params_conf, initial_values[label])
+                    self._build_options_for_transformation(params_conf, initial_values[label], rebuild_fn)
 
     def reset_dynamic_params_gui(self, _):
         self._load_encoding_params()
@@ -294,9 +356,14 @@ class InteractiveConversionTool:
                     transform_type = next(iter(transformation.keys()))
                     transform_folder = self.viewer.server.gui.add_folder(transform_type)
                     self.viewer.convert_gui_handles.append(transform_folder)
-                    with transform_folder:
-                        self.viewer.server.gui.add_markdown(f"input fields: {operation['input_fields']}")
-                        self._build_options_for_transformation(dynamic_transform_conf, transformation[transform_type])
+                    if isinstance(operation["input_fields"], list):
+                        description = f"input fields: {operation['input_fields']}"
+                    else:
+                        description = (
+                            f"input fields from prefix: {operation['input_fields']['from_fields_with_prefix']}"
+                        )
+
+                    self._build_transform_folder(transform_folder, description, transformation, transform_type)
 
     def _eval(self, scene_id):
         print("Running evaluation...")

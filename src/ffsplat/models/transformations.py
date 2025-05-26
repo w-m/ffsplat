@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
+    # TODO: check that data can be written as an image -> dtype,...
     match file_type:
         case "png":
             cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
@@ -845,28 +846,90 @@ class WriteFile(Transformation):
                 output_file_path = Path(base_path) / Path(file_path)
 
                 encode_ply(fields=fields_to_write, path=output_file_path)
-            case {"type": file_type, "coding_params": coding_params, "base_path": base_path}:
+            case {"type": "image", "image_codec": codec, "coding_params": coding_params, "base_path": base_path}:
                 for field_name, field_obj in parentOp.input_fields.items():
                     field_data = field_obj.data
-                    file_path = f"{field_name}.{file_type}"
+                    file_path = f"{field_name}.{codec}"
                     output_file_path = Path(base_path) / Path(file_path)
                     write_image(
                         output_file_path,
                         field_data,
-                        file_type,
+                        codec,
                         coding_params if isinstance(coding_params, dict) else {},
                     )
 
                     decoding_update.append({
                         "input_fields": [],
                         "transforms": [
-                            {"read_file": {"file_path": file_path, "type": file_type, "field_name": field_name}}
+                            {
+                                "read_file": {
+                                    "file_path": file_path,
+                                    "type": "image",
+                                    "image_codec": codec,
+                                    "field_name": field_name,
+                                }
+                            }
                         ],
                     })
             case _:
                 raise ValueError(f"Unknown WriteFile parameters: {params}")
 
         return {}, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for the transformation."""
+        file_type = params.get("type")
+        dynamic_params_config: list[dict[str, Any]] = []
+
+        if file_type == "image":
+            dynamic_params_config.append({
+                "label": "image_codec",
+                "type": "dropdown",
+                "values": ["avif", "png"],
+                "rebuild": True,
+            })
+
+            match params["image_codec"]:
+                case "avif":
+                    coding_params: list[dict[str, Any]] = []
+                    coding_params.append({
+                        "label": "chroma",
+                        "type": "dropdown",
+                        "values": ["0", "420", "444"],
+                        "data_type": int,
+                    })
+                    coding_params.append({
+                        "label": "matrix_coefficients",
+                        "type": "dropdown",
+                        "values": ["0", "1"],
+                        "data_type": int,
+                    })
+                    coding_params.append({
+                        "label": "lossless",
+                        "type": "bool",
+                        "set": "quality",
+                        "to": [0, -1],
+                        "rebuild": True,
+                    })
+                    if params["coding_params"]["quality"] != -1:
+                        coding_params.append({
+                            "label": "quality",
+                            "type": "number",
+                            "min": 0,
+                            "max": 100,
+                            "step": 1,
+                            "int_or_float": "int",
+                        })
+                    dynamic_params_config.append({"label": "coding_params", "type": "heading", "params": coding_params})
+
+                case "png":
+                    pass
+
+                case _:
+                    raise ValueError(f"unknown image codec: {params['image_codec']}")
+
+        return dynamic_params_config
 
 
 class ReadFile(Transformation):
@@ -881,8 +944,8 @@ class ReadFile(Transformation):
             case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
                 ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
                 new_fields.update(ply_fields)
-            case {"file_path": file_path, "type": file_type, "field_name": field_name}:
-                match file_type:
+            case {"file_path": file_path, "type": "image", "image_codec": codec, "field_name": field_name}:
+                match codec:
                     case "png":
                         img_field_data = torch.tensor(
                             cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
