@@ -33,12 +33,16 @@ def create_update_field(
     key: str,
     rebuild_fn: Callable | None = None,
     to_type: type | None = None,
+    mapping: Callable | None = None,
 ):
     def update_field(gui_event):
         if to_type:
             dict_to_update[key] = to_type(gui_event.target.value)
         else:
             dict_to_update[key] = gui_event.target.value
+        if mapping:
+            dict_to_update[key] = mapping(dict_to_update[key])
+
         if rebuild_fn:
             rebuild_fn()
 
@@ -277,19 +281,30 @@ class InteractiveConversionTool:
                     "max": maximum_value,
                     "step": stepsize,
                     "int_or_float": int_or_float,
+                    **params,
                 }:
                     if int_or_float == "int":
                         to_type = int
                     elif int_or_float == "float":
                         to_type = float
+
+                    key = params.get("set", label)
+
+                    default_value = initial_values[key]
+
+                    mapping = params.get("mapping")
+                    inverse_mapping = params.get("inverse_mapping")
+                    if inverse_mapping:
+                        default_value = inverse_mapping(default_value)
+
                     number_handle = self.viewer.server.gui.add_slider(
                         label,
                         to_type(minimum_value),
                         to_type(maximum_value),
                         to_type(stepsize),
-                        to_type(initial_values[label]),
+                        to_type(default_value),
                     )
-                    number_handle.on_update(create_update_field(initial_values, label))
+                    number_handle.on_update(create_update_field(initial_values, key, mapping=mapping))
 
                 case {"label": label, "type": "bool", **params}:
                     key = params.get("set", label)

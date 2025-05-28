@@ -20,8 +20,41 @@ if TYPE_CHECKING:
     from ..models.fields import Operation
 
 
+def convert_to_dtype(field_data: Tensor, dtype_str: str) -> Tensor:
+    match dtype_str:
+        case "uint8":
+            if field_data.min() < 0 or field_data.max() > 255:
+                raise ValueError(
+                    f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.uint8)
+        case "uint16":
+            if field_data.min() < 0 or field_data.max() > 65535:
+                raise ValueError(
+                    f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.uint16)
+        case "int32":
+            if field_data.min() < -2147483648 or field_data.max() > 2147483647:
+                raise ValueError(
+                    f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.int32)
+        case "uint32":
+            if field_data.min() < 0 or field_data.max() > 4294967295:
+                raise ValueError(
+                    f"Field data out of range for uint32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.uint32)
+        case "float32":
+            field_data = field_data.to(torch.float32)
+        case _:
+            raise ValueError(f"Unsupported dtype for quantization: {dtype_str}")
+
+    return field_data
+
+
 def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
-    # TODO: check that data can be written as an image -> dtype,...
     match file_type:
         case "png":
             cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
@@ -219,7 +252,7 @@ class Split(Transformation):
 class Remapping(Transformation):
     @staticmethod
     @override
-    def apply(  # noqa: C901
+    def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
@@ -314,30 +347,6 @@ class Remapping(Transformation):
                 normalized = normalized * (max_val_f - min_val_f) + min_val_f
 
                 field_data = normalized
-            case {
-                "method": "channelwise-minmax",
-                "min_values": min_values,
-                "max_values": max_values,
-                "dim": dim,
-            }:
-                if field_data is None:
-                    raise ValueError("Field data is None before channelwise remapping")
-
-                min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
-                max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
-
-                # create a shape that's 1 everywhere but in dim, where it has the size of min_values
-                # e.g. [1, 1, 3] for dim=2 with 3 min_values
-                view_shape = [1 if d != dim else -1 for d in range(field_data.dim())]
-
-                min_tensor = min_tensor.view(view_shape)
-                max_tensor = max_tensor.view(view_shape)
-
-                field_range = max_tensor - min_tensor
-                field_range[field_range == 0] = 1.0
-
-                field_data = minmax(field_data)
-                field_data = field_data * field_range + min_tensor
             case _:
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
@@ -496,6 +505,7 @@ class ToDType(Transformation):
             torch.uint8: "uint8",
             torch.uint16: "uint16",
             torch.int32: "int32",
+            torch.uint32: "uint32",
         }
 
         if round_to_int:
@@ -505,29 +515,7 @@ class ToDType(Transformation):
             "input_fields": [field_name],
             "transforms": [{"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}}],
         })
-        match dtype_str:
-            case "uint8":
-                if field_data.min() < 0 or field_data.max() > 255:
-                    raise ValueError(
-                        f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                    )
-                field_data = field_data.to(torch.uint8)
-            case "uint16":
-                if field_data.min() < 0 or field_data.max() > 65535:
-                    raise ValueError(
-                        f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                    )
-                field_data = field_data.to(torch.uint16)
-            case "int32":
-                if field_data.min() < -2147483648 or field_data.max() > 2147483647:
-                    raise ValueError(
-                        f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                    )
-                field_data = field_data.to(torch.int32)
-            case "float32":
-                field_data = field_data.to(torch.float32)
-            case _:
-                raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+        field_data = convert_to_dtype(field_data, dtype_str)
 
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
@@ -989,6 +977,122 @@ class ReadFile(Transformation):
         return new_fields, decoding_update
 
 
+class SimpleQuantize(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+        match params:
+            case {"min": min_val, "max": max_val, "dim": dim, "dtype": dtype_str, "round_to_int": round_to_int}:
+                min_val_f = float(min_val)
+                max_val_f = float(max_val)
+
+                min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+                max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+
+                field_range = max_vals - min_vals
+                field_range[field_range == 0] = 1.0
+
+                normalized = (field_data - min_vals) / field_range
+                normalized = normalized * (max_val_f - min_val_f) + min_val_f
+
+                field_data = normalized
+
+                torch_dtype_to_str = {
+                    torch.float32: "float32",
+                    torch.uint8: "uint8",
+                    torch.uint16: "uint16",
+                    torch.uint32: "uint32",
+                    torch.int32: "int32",
+                }
+
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "simple_quantize": {
+                                "min_values": min_vals.tolist(),
+                                "max_values": max_vals.tolist(),
+                                "dim": dim,
+                                "dtype": torch_dtype_to_str[field_data.dtype],
+                            }
+                        }
+                    ],
+                })
+
+                if round_to_int:
+                    field_data = torch.round(field_data)
+                field_data = convert_to_dtype(field_data, dtype_str)
+
+            case {
+                "min_values": min_values,
+                "max_values": max_values,
+                "dim": dim,
+                "dtype": dtype_str,
+            }:
+                if field_data is None:
+                    raise ValueError("Field data is None before channelwise remapping")
+
+                field_data = convert_to_dtype(field_data, dtype_str)
+
+                min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
+                max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
+
+                # create a shape that's 1 everywhere but in dim, where it has the size of min_values
+                # e.g. [1, 1, 3] for dim=2 with 3 min_values
+                view_shape = [1 if d != dim else -1 for d in range(field_data.dim())]
+
+                min_tensor = min_tensor.view(view_shape)
+                max_tensor = max_tensor.view(view_shape)
+
+                field_range = max_tensor - min_tensor
+                field_range[field_range == 0] = 1.0
+
+                field_data = minmax(field_data)
+                field_data = field_data * field_range + min_tensor
+            case _:
+                raise ValueError(f"Unknown remapping parameters: {params}")
+        new_fields[field_name] = Field(field_data, parentOp)
+        return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+
+        dynamic_params_config: list[dict[str, Any]] = []
+        max_val = 0
+        match params["dtype"]:
+            case "uint8":
+                max_val = 8
+            case "uint16":
+                max_val = 16
+            case "uint32":
+                max_val = 32
+            case _:
+                raise ValueError(f"Incompatible dtype {params['dtype']}")
+
+        dynamic_params_config.append({
+            "label": "n bits",
+            "type": "number",
+            "min": 1,
+            "max": max_val,
+            "step": 1,
+            "int_or_float": "int",
+            "set": "max",
+            "mapping": lambda x: 2**x - 1,
+            "inverse_mapping": lambda x: np.log2(x + 1),
+        })
+        return dynamic_params_config
+
+
 transformation_map = {
     "cluster": Cluster,
     "split": Split,
@@ -1005,6 +1109,7 @@ transformation_map = {
     "combine": Combine,
     "write_file": WriteFile,
     "read_file": ReadFile,
+    "simple_quantize": SimpleQuantize,
 }
 
 
