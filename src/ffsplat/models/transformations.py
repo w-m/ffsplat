@@ -82,7 +82,7 @@ class Transformation(ABC):
 
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
-        """Get the dynamic parameters for the transformation."""
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
         return []
 
 
@@ -130,7 +130,7 @@ class Cluster(Transformation):
 
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
-        """Get the dynamic parameters for the transformation."""
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
         dynamic_params_config: list[dict[str, Any]] = []
         dynamic_params_config.append({
             "label": "num_clusters",
@@ -709,7 +709,7 @@ class PLAS(Transformation):
 
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
-        """Get the dynamic parameters for the transformation."""
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
 
         if params.get("weights") is None:
             raise ValueError(f"PLAS parameters is missing weights: {params}")
@@ -878,7 +878,7 @@ class WriteFile(Transformation):
 
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
-        """Get the dynamic parameters for the transformation."""
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
         file_type = params.get("type")
         dynamic_params_config: list[dict[str, Any]] = []
 
@@ -892,20 +892,26 @@ class WriteFile(Transformation):
 
             match params["image_codec"]:
                 case "avif":
-                    coding_params: list[dict[str, Any]] = []
-                    coding_params.append({
+                    # check whether we need to update the coding params default:
+                    coding_params = params.get("coding_params")
+                    if len(coding_params) == 0:
+                        coding_params["quality"] = -1
+                        coding_params["chroma"] = 444
+                        coding_params["matrix_coefficients"] = 0
+                    dynamic_coding_params: list[dict[str, Any]] = []
+                    dynamic_coding_params.append({
                         "label": "chroma",
                         "type": "dropdown",
                         "values": ["0", "420", "444"],
                         "data_type": int,
                     })
-                    coding_params.append({
+                    dynamic_coding_params.append({
                         "label": "matrix_coefficients",
                         "type": "dropdown",
                         "values": ["0", "1"],
                         "data_type": int,
                     })
-                    coding_params.append({
+                    dynamic_coding_params.append({
                         "label": "lossless",
                         "type": "bool",
                         "set": "quality",
@@ -913,7 +919,7 @@ class WriteFile(Transformation):
                         "rebuild": True,
                     })
                     if params["coding_params"]["quality"] != -1:
-                        coding_params.append({
+                        dynamic_coding_params.append({
                             "label": "quality",
                             "type": "number",
                             "min": 0,
@@ -921,10 +927,17 @@ class WriteFile(Transformation):
                             "step": 1,
                             "int_or_float": "int",
                         })
-                    dynamic_params_config.append({"label": "coding_params", "type": "heading", "params": coding_params})
+                    dynamic_params_config.append({
+                        "label": "coding_params",
+                        "type": "heading",
+                        "params": dynamic_coding_params,
+                    })
 
                 case "png":
-                    pass
+                    # For now png has empty coding_params
+                    coding_params = params.get("coding_params")
+                    if len(coding_params) != 0:
+                        coding_params.clear()
 
                 case _:
                     raise ValueError(f"unknown image codec: {params['image_codec']}")
@@ -989,7 +1002,7 @@ def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Fi
 
 
 def get_dynamic_params(params: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """Get the dynamic parameters for a given transformation type."""
+    """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
     transform_type = next(iter(params.keys()))
     transformation = transformation_map.get(transform_type)
     if transformation is None:
