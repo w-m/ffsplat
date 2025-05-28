@@ -242,6 +242,8 @@ class Remapping(Transformation):
                     "transforms": [{"remapping": {"method": "exp"}}],
                 })
                 field_data = field_data.log()
+                if torch.isnan(field_data).any() or torch.isinf(field_data).any():
+                    raise ValueError("Can't apply log to values <= 0. You might want to try signed-log")
 
             case {"method": "signed-log"}:
                 decoding_update.append({
@@ -340,6 +342,18 @@ class Remapping(Transformation):
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "method",
+            "type": "dropdown",
+            "values": ["log", "signed-log", "inverse-sigmoid"],
+        })
+        return dynamic_params_config
 
 
 class ToField(Transformation):
