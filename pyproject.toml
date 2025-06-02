@@ -164,6 +164,9 @@ ignore = [
 [tool.ruff.format]
 preview = true
 
+[tool.deptry]
+extend_exclude = ["extern"]
+
 [tool.deptry.per_rule_ignores]
 # cupy required for kmeans in torchpq, but we don't import it explicitly in the code base
 # torchvision is required for torchmetrics
