@@ -144,6 +144,7 @@ class InteractiveConversionTool:
         self.dataset: Path = dataset_path
         self.current_scene = 0
         self.verbose = verbose
+        self.enable_scene_loading: bool = True
 
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
         self.input_gaussians = self.input_gaussians.to("cuda")
@@ -177,11 +178,12 @@ class InteractiveConversionTool:
 
     def convert(self, _):
         print("Converting scene...")
+        self.viewer._convert_button.disabled = True
         encoding_params = self.encoding_params
         output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
 
         encoder = SceneEncoder(
-            encoding_params=encoding_params,
+            encoding_params=copy.deepcopy(encoding_params),
             output_path=output_path,
             fields=self.input_gaussians.to_field_dict(),
             decoding_params=DecodingParams(
@@ -194,6 +196,7 @@ class InteractiveConversionTool:
             ),
         )
         encoder.encode(verbose=self.verbose)
+        self.viewer._convert_button.disabled = False
 
         # add scene to scene list and load it to view the scene
         output_format = self.viewer._output_dropdown.value
@@ -261,9 +264,10 @@ class InteractiveConversionTool:
         print(f"Loading scene {scene_id}...")
 
         # update the load buttons
-        self.viewer.load_buttons[self.current_scene].disabled = False
-        self.current_scene = scene_id
-        self.viewer.load_buttons[self.current_scene].disabled = True
+        if self.enable_scene_loading:
+            self.viewer.load_buttons[self.current_scene].disabled = False
+            self.current_scene = scene_id
+            self.viewer.load_buttons[self.current_scene].disabled = True
 
         self.viewer.scene_label.content = f"Showing scene: {scene_id}"
 
@@ -277,6 +281,7 @@ class InteractiveConversionTool:
         self.viewer.rerender(None)
 
     def full_evaluation(self, _):
+        self._disable_load_buttons()
         self.viewer.eval_button.disabled = True
         self.table_rows = ""
         for scene in self.scenes:
@@ -292,6 +297,7 @@ class InteractiveConversionTool:
         self.viewer.eval_info.visible = False
         self.viewer.eval_progress.visible = False
         self.viewer.eval_button.disabled = False
+        self._enable_load_buttons()
 
     def deactivate_convert_preview(
         self,
@@ -498,6 +504,17 @@ class InteractiveConversionTool:
         render_colors, _, _ = raster_out
         render_rgbs: Float[NDArray, "H W 3"] = render_colors[0, ..., 0:3].cpu().numpy()
         return render_rgbs
+
+    def _disable_load_buttons(self):
+        self.enable_scene_loading = False
+        for button in self.viewer.load_buttons:
+            button.disabled = True
+
+    def _enable_load_buttons(self):
+        self.enable_scene_loading = True
+        for button in self.viewer.load_buttons:
+            button.disabled = False
+        self.viewer.load_buttons[self.current_scene].disabled = True
 
     # Create render function with bound parameters
     def bound_render_fn(self, camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
