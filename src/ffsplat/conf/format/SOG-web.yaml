@@ -53,12 +53,12 @@ ops:
           # improvement_break: 0.1
           to_field: sorted_indices
           weights:
-            means_bytes_0: 0.1
+            means_bytes_0: 0.2
             means_bytes_1: 1.0
-            f_dc: 1.0
+            f_dc: 0.0
             f_rest: 0.0
             opacities: 0.0
-            scales: 1.0
+            scales: 0.0
             quaternions: 0.0
 
   - input_fields: [means_bytes_0, sorted_indices]
@@ -98,7 +98,7 @@ ops:
           start_dim: 1
       - cluster:
           method: kmeans
-          num_clusters: 4096
+          num_clusters: 65536
           distance: euclidean
           to_fields_with_prefix: f_rest_
 
@@ -123,8 +123,8 @@ ops:
   - input_fields: [f_rest_centroids]
     transforms:
       - simple_quantize:
-          min: 0.0
-          max: 255.0
+          min: 0
+          max: 31
           dim: 2
           dtype: uint8
           round_to_int: true
@@ -225,8 +225,8 @@ ops:
           type: image
           image_codec: avif
           coding_params:
-            quality: 100
-            chroma: 420
+            quality: -1
+            chroma: 444
             matrix_coefficients: 1
 
   - input_fields: [f_rest_labels_bytes_0]
