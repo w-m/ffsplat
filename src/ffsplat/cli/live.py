@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 import tempfile
@@ -11,6 +12,7 @@ from typing import Any, Callable
 
 import torch
 import viser
+import yaml
 from gsplat.rendering import rasterization
 from jaxtyping import Float
 from numpy.typing import NDArray
@@ -83,8 +85,8 @@ class SceneData:
     description: str
     data_path: Path
     input_format: str
+    encoding_params: EncodingParams
     scene_metrics: dict[str, float | int] = None
-    # encoding_params: EncodingParams | None
     # gaussians: Tensor
 
 
@@ -199,14 +201,46 @@ class InteractiveConversionTool:
 
     def _add_scene(self, description, data_path, input_format):
         self.scenes.append(
-            SceneData(id=len(self.scenes), description=description, data_path=data_path, input_format=input_format)
+            SceneData(
+                id=len(self.scenes),
+                description=description,
+                data_path=data_path,
+                input_format=input_format,
+                encoding_params=copy.deepcopy(self.encoding_params),
+            )
         )
-        self.viewer.add_to_scene_tab(len(self.scenes) - 1, description, self._load_scene, self._save_scene)
+        self.viewer.add_to_scene_tab(
+            len(self.scenes) - 1, description, self._load_scene, self._save_scene, self._save_encoding_params
+        )
         self._load_scene(len(self.scenes) - 1)
 
-    def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
+    def _build_description(self, encoding_params: EncodingParams, output_format: str) -> str:
+        print("building description")
         description = "**Template**  \n"
         description += f"{output_format}  \n"
+        changed_params_desc = ""
+
+        initial_params: EncodingParams = EncodingParams.from_yaml_file(
+            Path(f"src/ffsplat/conf/format/{output_format}.yaml")
+        )
+        for op_id, op in enumerate(self.encoding_params.ops):
+            for transform_id, transform in enumerate(op["transforms"]):
+                if transform != initial_params.ops[op_id]["transforms"][transform_id]:
+                    if isinstance(op["input_fields"], list):
+                        changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
+                    else:
+                        changed_params_desc += (
+                            f"input fields from prefix: {op['input_fields']['from_fields_with_prefix']}\n"
+                        )
+                    changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
+
+        if changed_params_desc != "":
+            description += "**Customized Transformations**  \n"
+            description += changed_params_desc
+
+        # description = description.replace("\n", "  \n")
+        print(description)
+
         return description
 
     def _save_scene(self, scene_id):
@@ -215,6 +249,13 @@ class InteractiveConversionTool:
         if not os.path.exists(scene_path):
             os.makedirs(scene_path)
         shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
+
+    def _save_encoding_params(self, scene_id):
+        print(f"Saving encoding paramters from scene {scene_id}...")
+        params_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/encoding_params")
+        if not os.path.exists(params_path):
+            os.makedirs(params_path)
+        self.scenes[scene_id].encoding_params.to_yaml_file(params_path)
 
     def _load_scene(self, scene_id):
         print(f"Loading scene {scene_id}...")

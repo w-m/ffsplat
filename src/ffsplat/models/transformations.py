@@ -895,7 +895,7 @@ class WriteFile(Transformation):
             match params["image_codec"]:
                 case "avif":
                     # check whether we need to update the coding params default:
-                    coding_params = params.get("coding_params")
+                    coding_params: dict[str, Any] = params.get("coding_params", {})
                     if len(coding_params) == 0:
                         coding_params["quality"] = -1
                         coding_params["chroma"] = 444
@@ -937,7 +937,7 @@ class WriteFile(Transformation):
 
                 case "png":
                     # For now png has empty coding_params
-                    coding_params = params.get("coding_params")
+                    coding_params = params.get("coding_params", {})
                     if len(coding_params) != 0:
                         coding_params.clear()
 

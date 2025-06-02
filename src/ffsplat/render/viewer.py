@@ -171,13 +171,17 @@ class Viewer:
             self._convert_button.on_click(convert_fn)
         reset_dynamic_params_gui_fn(None)
 
-    def add_to_scene_tab(self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable):
+    def add_to_scene_tab(
+        self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable, save_params_fn: Callable
+    ):
         with self.scenes_tab, self.server.gui.add_folder(f"Scene {scene_id}"):
             self.server.gui.add_markdown(description)
-            load_button = self.server.gui.add_button("Load")
+            load_button = self.server.gui.add_button("Load scene")
             load_button.on_click(lambda _: load_fn(scene_id))
-            save_button = self.server.gui.add_button("Save")
+            save_button = self.server.gui.add_button("Save scene")
             save_button.on_click(lambda _: save_fn(scene_id))
+            save_button = self.server.gui.add_button("Save encoding parameters")
+            save_button.on_click(lambda _: save_params_fn(scene_id))
             self.load_buttons.append(load_button)
 
     def add_test_functionality(self, test_fn: Callable):
