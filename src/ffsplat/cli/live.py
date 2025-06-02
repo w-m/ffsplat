@@ -337,7 +337,7 @@ class InteractiveConversionTool:
                     mapping = params.get("mapping")
                     inverse_mapping = params.get("inverse_mapping")
                     if inverse_mapping:
-                        default_value = inverse_mapping(default_value)
+                        default_value = inverse_mapping(float(default_value))
 
                     number_handle = self.viewer.server.gui.add_slider(
                         label,

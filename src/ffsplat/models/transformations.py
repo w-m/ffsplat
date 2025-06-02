@@ -731,10 +731,12 @@ class PLAS(Transformation):
         dynamic_params_config.append({
             "label": "improvement_break",
             "type": "number",
-            "min": 0,
-            "max": 0.001,
-            "step": 0.0001,
-            "dtype": float,
+            "min": -7,
+            "max": -1,
+            "step": 1,
+            "dtype": int,
+            "mapping": lambda x: 10**x,
+            "inverse_mapping": lambda x: np.log10(x),
         })
 
         weight_config: list[dict[str, Any]] = []
