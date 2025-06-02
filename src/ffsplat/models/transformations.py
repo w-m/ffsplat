@@ -20,6 +20,40 @@ if TYPE_CHECKING:
     from ..models.fields import Operation
 
 
+def convert_to_dtype(field_data: Tensor, dtype_str: str) -> Tensor:
+    match dtype_str:
+        case "uint8":
+            if field_data.min() < 0 or field_data.max() > 255:
+                raise ValueError(
+                    f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.uint8)
+        case "uint16":
+            if field_data.min() < 0 or field_data.max() > 65535:
+                raise ValueError(
+                    f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.uint16)
+        case "int32":
+            if field_data.min() < -2147483648 or field_data.max() > 2147483647:
+                raise ValueError(
+                    f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.int32)
+        case "uint32":
+            if field_data.min() < 0 or field_data.max() > 4294967295:
+                raise ValueError(
+                    f"Field data out of range for uint32 conversion: {field_data.min().item()} - {field_data.max().item()}"
+                )
+            field_data = field_data.to(torch.uint32)
+        case "float32":
+            field_data = field_data.to(torch.float32)
+        case _:
+            raise ValueError(f"Unsupported dtype for quantization: {dtype_str}")
+
+    return field_data
+
+
 def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
     match file_type:
         case "png":
@@ -79,6 +113,11 @@ class Transformation(ABC):
         Transformations that are only available for decoding do return empty decoding updates"""
         pass
 
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+        return []
+
 
 class Cluster(Transformation):
     @staticmethod
@@ -121,6 +160,29 @@ class Cluster(Transformation):
             case _:
                 raise ValueError(f"Unknown clustering method: {params['method']}")
         return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "#clusters",
+            "type": "number",
+            "min": 1,
+            "max": 16,
+            "step": 1,
+            "dtype": int,
+            "set": "num_clusters",
+            "mapping": lambda x: 2**x,
+            "inverse_mapping": lambda x: np.log2(x),
+        })
+        dynamic_params_config.append({
+            "label": "distance",
+            "type": "dropdown",
+            "values": ["euclidean", "cosine", "manhatten"],
+        })
+
+        return dynamic_params_config
 
 
 class Split(Transformation):
@@ -193,7 +255,7 @@ class Split(Transformation):
 class Remapping(Transformation):
     @staticmethod
     @override
-    def apply(  # noqa: C901
+    def apply(
         params: dict[str, Any], parentOp: "Operation", verbose: bool = False
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
@@ -216,6 +278,8 @@ class Remapping(Transformation):
                     "transforms": [{"remapping": {"method": "exp"}}],
                 })
                 field_data = field_data.log()
+                if torch.isnan(field_data).any() or torch.isinf(field_data).any():
+                    raise ValueError("Can't apply log to values <= 0. You might want to try signed-log")
 
             case {"method": "signed-log"}:
                 decoding_update.append({
@@ -286,34 +350,22 @@ class Remapping(Transformation):
                 normalized = normalized * (max_val_f - min_val_f) + min_val_f
 
                 field_data = normalized
-            case {
-                "method": "channelwise-minmax",
-                "min_values": min_values,
-                "max_values": max_values,
-                "dim": dim,
-            }:
-                if field_data is None:
-                    raise ValueError("Field data is None before channelwise remapping")
-
-                min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
-                max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
-
-                # create a shape that's 1 everywhere but in dim, where it has the size of min_values
-                # e.g. [1, 1, 3] for dim=2 with 3 min_values
-                view_shape = [1 if d != dim else -1 for d in range(field_data.dim())]
-
-                min_tensor = min_tensor.view(view_shape)
-                max_tensor = max_tensor.view(view_shape)
-
-                field_range = max_tensor - min_tensor
-                field_range[field_range == 0] = 1.0
-
-                field_data = minmax(field_data)
-                field_data = field_data * field_range + min_tensor
             case _:
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "method",
+            "type": "dropdown",
+            "values": ["log", "signed-log", "inverse-sigmoid"],
+        })
+        return dynamic_params_config
 
 
 class ToField(Transformation):
@@ -456,6 +508,7 @@ class ToDType(Transformation):
             torch.uint8: "uint8",
             torch.uint16: "uint16",
             torch.int32: "int32",
+            torch.uint32: "uint32",
         }
 
         if round_to_int:
@@ -465,29 +518,7 @@ class ToDType(Transformation):
             "input_fields": [field_name],
             "transforms": [{"to_dtype": {"dtype": torch_dtype_to_str[field_data.dtype]}}],
         })
-        match dtype_str:
-            case "uint8":
-                if field_data.min() < 0 or field_data.max() > 255:
-                    raise ValueError(
-                        f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                    )
-                field_data = field_data.to(torch.uint8)
-            case "uint16":
-                if field_data.min() < 0 or field_data.max() > 65535:
-                    raise ValueError(
-                        f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                    )
-                field_data = field_data.to(torch.uint16)
-            case "int32":
-                if field_data.min() < -2147483648 or field_data.max() > 2147483647:
-                    raise ValueError(
-                        f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
-                    )
-                field_data = field_data.to(torch.int32)
-            case "float32":
-                field_data = field_data.to(torch.float32)
-            case _:
-                raise ValueError(f"Unsupported dtype for conversion: {dtype_str}")
+        field_data = convert_to_dtype(field_data, dtype_str)
 
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
@@ -681,6 +712,54 @@ class PLAS(Transformation):
 
         return new_fields, []
 
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+
+        if params.get("weights") is None:
+            raise ValueError(f"PLAS parameters is missing weights: {params}")
+        field_names = list(params["weights"].keys())
+        scaling_functions = ["standardize", "minmax", "none"]
+
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "scaling_fn",
+            "type": "dropdown",
+            "values": scaling_functions,
+        })
+        dynamic_params_config.append({
+            "label": "shuffle",
+            "type": "bool",
+        })
+        dynamic_params_config.append({
+            "label": "improvement_break",
+            "type": "number",
+            "min": -7,
+            "max": -1,
+            "step": 1,
+            "dtype": int,
+            "mapping": lambda x: 10**x,
+            "inverse_mapping": lambda x: np.log10(x),
+        })
+
+        weight_config: list[dict[str, Any]] = []
+        for field_name in field_names:
+            weight_config.append({
+                "label": field_name,
+                "type": "number",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "dtype": float,
+            })
+        dynamic_params_config.append({
+            "label": "weights",
+            "type": "heading",
+            "params": weight_config,
+        })
+
+        return dynamic_params_config
+
 
 class Combine(Transformation):
     @staticmethod
@@ -769,28 +848,103 @@ class WriteFile(Transformation):
                 output_file_path = Path(base_path) / Path(file_path)
 
                 encode_ply(fields=fields_to_write, path=output_file_path)
-            case {"type": file_type, "coding_params": coding_params, "base_path": base_path}:
+            case {"type": "image", "image_codec": codec, "coding_params": coding_params, "base_path": base_path}:
                 for field_name, field_obj in parentOp.input_fields.items():
                     field_data = field_obj.data
-                    file_path = f"{field_name}.{file_type}"
+                    file_path = f"{field_name}.{codec}"
                     output_file_path = Path(base_path) / Path(file_path)
                     write_image(
                         output_file_path,
                         field_data,
-                        file_type,
+                        codec,
                         coding_params if isinstance(coding_params, dict) else {},
                     )
 
                     decoding_update.append({
                         "input_fields": [],
                         "transforms": [
-                            {"read_file": {"file_path": file_path, "type": file_type, "field_name": field_name}}
+                            {
+                                "read_file": {
+                                    "file_path": file_path,
+                                    "type": "image",
+                                    "image_codec": codec,
+                                    "field_name": field_name,
+                                }
+                            }
                         ],
                     })
             case _:
                 raise ValueError(f"Unknown WriteFile parameters: {params}")
 
         return {}, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+        file_type = params.get("type")
+        dynamic_params_config: list[dict[str, Any]] = []
+
+        if file_type == "image":
+            dynamic_params_config.append({
+                "label": "image_codec",
+                "type": "dropdown",
+                "values": ["avif", "png"],
+                "rebuild": True,
+            })
+
+            match params["image_codec"]:
+                case "avif":
+                    # check whether we need to update the coding params default:
+                    coding_params: dict[str, Any] = params.get("coding_params", {})
+                    if len(coding_params) == 0:
+                        coding_params["quality"] = -1
+                        coding_params["chroma"] = 444
+                        coding_params["matrix_coefficients"] = 0
+                    dynamic_coding_params: list[dict[str, Any]] = []
+                    dynamic_coding_params.append({
+                        "label": "chroma",
+                        "type": "dropdown",
+                        "values": ["0", "420", "444"],
+                        "data_type": int,
+                    })
+                    dynamic_coding_params.append({
+                        "label": "matrix_coefficients",
+                        "type": "dropdown",
+                        "values": ["0", "1"],
+                        "data_type": int,
+                    })
+                    dynamic_coding_params.append({
+                        "label": "lossless",
+                        "type": "bool",
+                        "set": "quality",
+                        "to": [0, -1],
+                        "rebuild": True,
+                    })
+                    if params["coding_params"]["quality"] != -1:
+                        dynamic_coding_params.append({
+                            "label": "quality",
+                            "type": "number",
+                            "min": 0,
+                            "max": 100,
+                            "step": 1,
+                            "dtype": int,
+                        })
+                    dynamic_params_config.append({
+                        "label": "coding_params",
+                        "type": "heading",
+                        "params": dynamic_coding_params,
+                    })
+
+                case "png":
+                    # For now png has empty coding_params
+                    coding_params = params.get("coding_params", {})
+                    if len(coding_params) != 0:
+                        coding_params.clear()
+
+                case _:
+                    raise ValueError(f"unknown image codec: {params['image_codec']}")
+
+        return dynamic_params_config
 
 
 class ReadFile(Transformation):
@@ -805,8 +959,8 @@ class ReadFile(Transformation):
             case {"file_path": file_path, "type": "ply", "field_prefix": field_prefix}:
                 ply_fields = decode_ply(file_path=Path(file_path), field_prefix=field_prefix)
                 new_fields.update(ply_fields)
-            case {"file_path": file_path, "type": file_type, "field_name": field_name}:
-                match file_type:
+            case {"file_path": file_path, "type": "image", "image_codec": codec, "field_name": field_name}:
+                match codec:
                     case "png":
                         img_field_data = torch.tensor(
                             cv2.imread(file_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
@@ -821,6 +975,122 @@ class ReadFile(Transformation):
                 raise ValueError(f"Unknown ReadFile parameters: {params}")
 
         return new_fields, decoding_update
+
+
+class SimpleQuantize(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+        match params:
+            case {"min": min_val, "max": max_val, "dim": dim, "dtype": dtype_str, "round_to_int": round_to_int}:
+                min_val_f = float(min_val)
+                max_val_f = float(max_val)
+
+                min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+                max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+
+                field_range = max_vals - min_vals
+                field_range[field_range == 0] = 1.0
+
+                normalized = (field_data - min_vals) / field_range
+                normalized = normalized * (max_val_f - min_val_f) + min_val_f
+
+                field_data = normalized
+
+                torch_dtype_to_str = {
+                    torch.float32: "float32",
+                    torch.uint8: "uint8",
+                    torch.uint16: "uint16",
+                    torch.uint32: "uint32",
+                    torch.int32: "int32",
+                }
+
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "simple_quantize": {
+                                "min_values": min_vals.tolist(),
+                                "max_values": max_vals.tolist(),
+                                "dim": dim,
+                                "dtype": torch_dtype_to_str[field_data.dtype],
+                            }
+                        }
+                    ],
+                })
+
+                if round_to_int:
+                    field_data = torch.round(field_data)
+                field_data = convert_to_dtype(field_data, dtype_str)
+
+            case {
+                "min_values": min_values,
+                "max_values": max_values,
+                "dim": dim,
+                "dtype": dtype_str,
+            }:
+                if field_data is None:
+                    raise ValueError("Field data is None before channelwise remapping")
+
+                field_data = convert_to_dtype(field_data, dtype_str)
+
+                min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
+                max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
+
+                # create a shape that's 1 everywhere but in dim, where it has the size of min_values
+                # e.g. [1, 1, 3] for dim=2 with 3 min_values
+                view_shape = [1 if d != dim else -1 for d in range(field_data.dim())]
+
+                min_tensor = min_tensor.view(view_shape)
+                max_tensor = max_tensor.view(view_shape)
+
+                field_range = max_tensor - min_tensor
+                field_range[field_range == 0] = 1.0
+
+                field_data = minmax(field_data)
+                field_data = field_data * field_range + min_tensor
+            case _:
+                raise ValueError(f"Unknown remapping parameters: {params}")
+        new_fields[field_name] = Field(field_data, parentOp)
+        return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+
+        dynamic_params_config: list[dict[str, Any]] = []
+        max_val = 0
+        match params["dtype"]:
+            case "uint8":
+                max_val = 8
+            case "uint16":
+                max_val = 16
+            case "uint32":
+                max_val = 32
+            case _:
+                raise ValueError(f"Incompatible dtype {params['dtype']}")
+
+        dynamic_params_config.append({
+            "label": "n bits",
+            "type": "number",
+            "min": 1,
+            "max": max_val,
+            "step": 1,
+            "dtype": int,
+            "set": "max",
+            "mapping": lambda x: 2**x - 1,
+            "inverse_mapping": lambda x: np.log2(x + 1),
+        })
+        return dynamic_params_config
 
 
 transformation_map = {
@@ -839,6 +1109,7 @@ transformation_map = {
     "combine": Combine,
     "write_file": WriteFile,
     "read_file": ReadFile,
+    "simple_quantize": SimpleQuantize,
 }
 
 
@@ -847,3 +1118,12 @@ def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Fi
     if transformation is None:
         raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
     return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose)
+
+
+def get_dynamic_params(params: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+    transform_type = next(iter(params.keys()))
+    transformation = transformation_map.get(transform_type)
+    if transformation is None:
+        raise ValueError(f"Unknown transformation: {transform_type}")
+    return transformation.get_dynamic_params(params[transform_type])

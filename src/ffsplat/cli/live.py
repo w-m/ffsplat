@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 import tempfile
@@ -5,11 +6,13 @@ import time
 from argparse import ArgumentParser
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import viser
+import yaml
 from gsplat.rendering import rasterization
 from jaxtyping import Float
 from numpy.typing import NDArray
@@ -23,25 +26,44 @@ from ..coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
 from ..datasets.blenderparser import BlenderParser
 from ..datasets.colmapparser import ColmapParser
 from ..datasets.dataset import Dataset
+from ..models.transformations import get_dynamic_params
 from ..render.viewer import CameraState, Viewer
 
-# TODO: this is a duplicate with the viewer
-encoding_formats: list[str] = [
-    "3DGS_INRIA_ply",
-    "3DGS_INRIA_nosh_ply",
-    "SOG-web",
-    "SOG-web-nosh",
-    "SOG-web-sh-split",
-]  # available formats
 
-operations: dict[str, list[str]] = {
-    "remapping": ["inverse-sigmoid", "log", "channelwise-minmax", "signed-log"]
-}  # methods for each operation
-
-
-def create_update_field(dict_to_update: dict[str, Any], key: str):
+def create_update_field(
+    dict_to_update: dict[str, Any],
+    key: str,
+    rebuild_fn: Callable | None = None,
+    to_type: type | None = None,
+    mapping: Callable | None = None,
+):
     def update_field(gui_event):
-        dict_to_update[key] = gui_event.target.value
+        if to_type:
+            dict_to_update[key] = to_type(gui_event.target.value)
+        else:
+            dict_to_update[key] = gui_event.target.value
+        if mapping:
+            dict_to_update[key] = mapping(dict_to_update[key])
+
+        if rebuild_fn:
+            rebuild_fn()
+
+    return update_field
+
+
+def create_update_field_from_bool(
+    dict_to_update: dict[str, Any],
+    key: str,
+    rebuild_fn: Callable | None = None,
+    to_values: None | list[Any] = None,
+):
+    def update_field(gui_event):
+        if to_values:
+            dict_to_update[key] = to_values[gui_event.target.value]
+        else:
+            dict_to_update[key] = gui_event.target.value
+        if rebuild_fn:
+            rebuild_fn()
 
     return update_field
 
@@ -63,8 +85,8 @@ class SceneData:
     description: str
     data_path: Path
     input_format: str
+    encoding_params: EncodingParams
     scene_metrics: dict[str, float | int] = None
-    # encoding_params: EncodingParams | None
     # gaussians: Tensor
 
 
@@ -120,9 +142,9 @@ class InteractiveConversionTool:
     ):
         self.scenes: list[SceneData] = []
         self.dataset: Path = dataset_path
-        self.results_path: Path = results_path
         self.current_scene = 0
         self.verbose = verbose
+        self.enable_scene_loading: bool = True
 
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
         self.input_gaussians = self.input_gaussians.to("cuda")
@@ -131,6 +153,8 @@ class InteractiveConversionTool:
 
         self.server = viser.ViserServer(verbose=False)
         self.viewer = Viewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
+
+        self.viewer.add_scenes(results_path)
 
         if dataset_path is not None:
             colmap_path = os.path.join(dataset_path, "sparse/0/")
@@ -146,18 +170,20 @@ class InteractiveConversionTool:
             self.dataset = Dataset(dataparser)
             self.viewer.add_eval(self.full_evaluation)
 
-        self.viewer.add_convert(self._build_convert_options, self.convert)
+        self.viewer.add_convert(self.reset_dynamic_params_gui, self.convert)
+
         self._add_scene("input", input_path, input_format)
 
         # self.viewer.add_test_functionality(self.change_scene)
 
     def convert(self, _):
         print("Converting scene...")
+        self.viewer._convert_button.disabled = True
         encoding_params = self.encoding_params
         output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
 
         encoder = SceneEncoder(
-            encoding_params=encoding_params,
+            encoding_params=copy.deepcopy(encoding_params),
             output_path=output_path,
             fields=self.input_gaussians.to_field_dict(),
             decoding_params=DecodingParams(
@@ -169,48 +195,83 @@ class InteractiveConversionTool:
                 scene=encoding_params.scene,
             ),
         )
-        encoder.encode(verbose=self.verbose)
+        try:
+            encoder.encode(verbose=self.verbose)
+        except Exception:
+            self.viewer._convert_button.disabled = False
+            raise
 
+        self.viewer._convert_button.disabled = False
         # add scene to scene list and load it to view the scene
         output_format = self.viewer._output_dropdown.value
         self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
 
     def _add_scene(self, description, data_path, input_format):
         self.scenes.append(
-            SceneData(id=len(self.scenes), description=description, data_path=data_path, input_format=input_format)
+            SceneData(
+                id=len(self.scenes),
+                description=description,
+                data_path=data_path,
+                input_format=input_format,
+                encoding_params=copy.deepcopy(self.encoding_params),
+            )
         )
-        self.viewer.add_to_scene_tab(len(self.scenes) - 1, description, self._load_scene, self._save_scene)
+        self.viewer.add_to_scene_tab(
+            len(self.scenes) - 1, description, self._load_scene, self._save_scene, self._save_encoding_params
+        )
         self._load_scene(len(self.scenes) - 1)
 
-    def _build_description(self, encoding_params: EncodingParams, output_format) -> str:
+    def _build_description(self, encoding_params: EncodingParams, output_format: str) -> str:
+        print("building description")
         description = "**Template**  \n"
         description += f"{output_format}  \n"
-        return description
-        for field_name, field_operations in encoding_params.fields.items():
-            for field_operation in field_operations:
-                for operation, _ in operations.items():
-                    if operation in field_operation:
-                        description += f" **{field_name}**  \n"
-                        description += f"  {operation}: {field_operation[operation]['method']}  \n"
+        changed_params_desc = ""
+
+        initial_params: EncodingParams = EncodingParams.from_yaml_file(
+            Path(f"src/ffsplat/conf/format/{output_format}.yaml")
+        )
+        for op_id, op in enumerate(self.encoding_params.ops):
+            for transform_id, transform in enumerate(op["transforms"]):
+                if transform != initial_params.ops[op_id]["transforms"][transform_id]:
+                    if isinstance(op["input_fields"], list):
+                        changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
+                    else:
+                        changed_params_desc += (
+                            f"input fields from prefix: {op['input_fields']['from_fields_with_prefix']}\n"
+                        )
+                    changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
+
+        if changed_params_desc != "":
+            description += "**Customized Transformations**  \n"
+            description += changed_params_desc
+
+        # description = description.replace("\n", "  \n")
+        print(description)
+
         return description
 
     def _save_scene(self, scene_id):
         print(f"Saving scene {scene_id}...")
-        if self.results_path is None:
-            print("No results path specified. Cannot save scene.")
-            return
-        scene_path = self.results_path / Path(f"scene_{scene_id}/data")
+        scene_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/data")
         if not os.path.exists(scene_path):
             os.makedirs(scene_path)
         shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
+
+    def _save_encoding_params(self, scene_id):
+        print(f"Saving encoding paramters from scene {scene_id}...")
+        params_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/encoding_params")
+        if not os.path.exists(params_path):
+            os.makedirs(params_path)
+        self.scenes[scene_id].encoding_params.to_yaml_file(params_path)
 
     def _load_scene(self, scene_id):
         print(f"Loading scene {scene_id}...")
 
         # update the load buttons
-        self.viewer.load_buttons[self.current_scene].disabled = False
-        self.current_scene = scene_id
-        self.viewer.load_buttons[self.current_scene].disabled = True
+        if self.enable_scene_loading:
+            self.viewer.load_buttons[self.current_scene].disabled = False
+            self.current_scene = scene_id
+            self.viewer.load_buttons[self.current_scene].disabled = True
 
         self.viewer.scene_label.content = f"Showing scene: {scene_id}"
 
@@ -224,6 +285,7 @@ class InteractiveConversionTool:
         self.viewer.rerender(None)
 
     def full_evaluation(self, _):
+        self._disable_load_buttons()
         self.viewer.eval_button.disabled = True
         self.table_rows = ""
         for scene in self.scenes:
@@ -239,52 +301,130 @@ class InteractiveConversionTool:
         self.viewer.eval_info.visible = False
         self.viewer.eval_progress.visible = False
         self.viewer.eval_button.disabled = False
+        self._enable_load_buttons()
 
     def deactivate_convert_preview(
         self,
     ):
         pass
 
-    def _build_convert_options(self, _):
-        # TODO: this should be refactored once the Field and Operation classes are ready
-        # this is not a class function of the viewer to store the handles in a dict in this class. this is to separate the logic of the conversion from the viewer. this way we can store the handles and their data needed for the conversion in this class
-        # clear previous gui conversion handles
-        # TODO: should we store the handles in the viewer? or should we store them in this class?
-        # is the split between the viewer necessary at all? i did this to separate the logic of the evaluation from the viewer, but the split is not as clean as initially thought
+    def _build_transform_folder(self, transform_folder, description, transformation, transform_type):
+        # clear transform folder for rebuild
+        for child in tuple(transform_folder._children.values()):
+            child.remove()
+        dynamic_params_conf = get_dynamic_params(transformation)
+        initial_values = transformation[transform_type]
+
+        with transform_folder:
+            self.viewer.server.gui.add_markdown(description)
+            rebuild_fn = partial(
+                self._build_transform_folder, transform_folder, description, transformation, transform_type
+            )
+            self._build_options_for_transformation(dynamic_params_conf, initial_values, rebuild_fn)
+
+    def _build_options_for_transformation(self, dynamic_params_conf, initial_values, rebuild_fn):
+        for item in dynamic_params_conf:
+            match item:
+                case {
+                    "label": label,
+                    "type": "number",
+                    "min": minimum_value,
+                    "max": maximum_value,
+                    "step": stepsize,
+                    "dtype": to_type,
+                    **params,
+                }:
+                    key = params.get("set", label)
+
+                    default_value = initial_values[key]
+
+                    mapping = params.get("mapping")
+                    inverse_mapping = params.get("inverse_mapping")
+                    if inverse_mapping:
+                        default_value = inverse_mapping(float(default_value))
+
+                    number_handle = self.viewer.server.gui.add_slider(
+                        label,
+                        to_type(minimum_value),
+                        to_type(maximum_value),
+                        to_type(stepsize),
+                        to_type(default_value),
+                    )
+                    number_handle.on_update(create_update_field(initial_values, key, mapping=mapping))
+
+                case {"label": label, "type": "bool", **params}:
+                    key = params.get("set", label)
+                    rebuild = params.get("rebuild", False)
+                    to_values = params.get("to", None)
+
+                    if to_values:
+                        checkbox_handle = self.viewer.server.gui.add_checkbox(
+                            label, to_values[1] == initial_values[key]
+                        )
+                    else:
+                        checkbox_handle = self.viewer.server.gui.add_checkbox(label, initial_values[key])
+
+                    local_rebuild_fn = rebuild_fn
+                    if rebuild:
+                        local_rebuild_fn = rebuild_fn
+
+                    checkbox_handle.on_update(
+                        create_update_field_from_bool(initial_values, key, local_rebuild_fn, to_values)
+                    )
+
+                case {"label": label, "type": "dropdown", "values": values, **params}:
+                    dropdown_handle = self.viewer.server.gui.add_dropdown(label, values, str(initial_values[label]))
+                    rebuild = params.get("rebuild", False)
+                    to_values = params.get("data_type", str)
+
+                    local_rebuild_fn = rebuild_fn
+                    if rebuild:
+                        local_rebuild_fn = rebuild_fn
+
+                    dropdown_handle.on_update(create_update_field(initial_values, label, local_rebuild_fn, to_values))
+
+                case {
+                    "label": label,
+                    "type": "heading",
+                    "params": params_conf,
+                }:
+                    self.viewer.server.gui.add_markdown(f"{label}:")
+                    self._build_options_for_transformation(params_conf, initial_values[label], rebuild_fn)
+
+    def reset_dynamic_params_gui(self, _):
+        self._load_encoding_params()
+        self._build_convert_options()
+
+    def _load_encoding_params(self):
+        output_format = self.viewer._output_dropdown.value
+        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+
+    def _build_convert_options(self):
         for handle in self.viewer.convert_gui_handles:
             handle.remove()
 
-        # load the default encoding params
-        self.encoding_handler = {}
-        output_format = self.viewer._output_dropdown.value
-        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
-        # remove this return when refactoring this function. see line 240
-        return
+        self.viewer.convert_gui_handles = []
 
-        # TODO: why is this in this with block?
-        with self.viewer.convert_folder:
-            self.viewer.convert_gui_handles = []
+        with self.viewer.convert_tab:
+            for operation in self.encoding_params.ops:
+                # list input fields
+                for transformation in operation["transforms"]:
+                    # get list with customizable options
 
-            for field_name, field_operations in self.encoding_params.fields.items():
-                with self.viewer.server.gui.add_folder(field_name) as field_folder:
-                    field_is_customizable = False
-                    for idx, field_operation in enumerate(field_operations):
-                        for operation, operation_options in operations.items():
-                            if operation in field_operation:
-                                field_is_customizable = True
-                                dropdown_handle = self.viewer.server.gui.add_dropdown(
-                                    operation, operation_options, field_operation[operation]["method"]
-                                )
-                                dropdown_handle.on_update(
-                                    create_update_field(
-                                        self.encoding_params.fields[field_name][idx][operation], "method"
-                                    )
-                                )
-
-                    if not field_is_customizable:
-                        field_folder.remove()
+                    dynamic_transform_conf = get_dynamic_params(transformation)
+                    if len(dynamic_transform_conf) == 0:
+                        continue
+                    transform_type = next(iter(transformation.keys()))
+                    transform_folder = self.viewer.server.gui.add_folder(transform_type)
+                    self.viewer.convert_gui_handles.append(transform_folder)
+                    if isinstance(operation["input_fields"], list):
+                        description = f"input fields: {operation['input_fields']}"
                     else:
-                        self.viewer.convert_gui_handles.append(field_folder)
+                        description = (
+                            f"input fields from prefix: {operation['input_fields']['from_fields_with_prefix']}"
+                        )
+
+                    self._build_transform_folder(transform_folder, description, transformation, transform_type)
 
     def _eval(self, scene_id):
         print("Running evaluation...")
@@ -297,9 +437,7 @@ class InteractiveConversionTool:
         elapsed_time = 0
         metrics = defaultdict(list)
 
-        imgs_path: Path | None = None
-        if self.results_path is not None:
-            imgs_path = self.results_path / Path(f"scene_{scene_id}/imgs")
+        imgs_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/imgs")
 
         for i, data in enumerate(valloader):
             elapsed_time += eval_step(
@@ -365,6 +503,17 @@ class InteractiveConversionTool:
         render_colors, _, _ = raster_out
         render_rgbs: Float[NDArray, "H W 3"] = render_colors[0, ..., 0:3].cpu().numpy()
         return render_rgbs
+
+    def _disable_load_buttons(self):
+        self.enable_scene_loading = False
+        for button in self.viewer.load_buttons:
+            button.disabled = True
+
+    def _enable_load_buttons(self):
+        self.enable_scene_loading = True
+        for button in self.viewer.load_buttons:
+            button.disabled = False
+        self.viewer.load_buttons[self.current_scene].disabled = True
 
     # Create render function with bound parameters
     def bound_render_fn(self, camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:

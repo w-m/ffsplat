@@ -23,12 +23,10 @@ ops:
     transforms:
       - remapping:
           method: signed-log
-      - remapping:
-          method: channelwise-minmax
+      - simple_quantize:
           min: 0
           max: 65535
           dim: 2
-      - to_dtype:
           dtype: uint16
           round_to_int: true
       - split_bytes:
@@ -55,12 +53,12 @@ ops:
           # improvement_break: 0.1
           to_field: sorted_indices
           weights:
-            means_bytes_0: 0.1
+            means_bytes_0: 0.2
             means_bytes_1: 1.0
-            f_dc: 1.0
+            f_dc: 0.0
             f_rest: 0.0
             opacities: 0.0
-            scales: 1.0
+            scales: 0.0
             quaternions: 0.0
 
   - input_fields: [means_bytes_0, sorted_indices]
@@ -79,12 +77,10 @@ ops:
     transforms:
       - flatten:
           start_dim: 1
-      - remapping:
-          method: channelwise-minmax
+      - simple_quantize:
           min: 0.0
           max: 255.0
           dim: 1
-      - to_dtype:
           dtype: uint8
           round_to_int: true
 
@@ -102,7 +98,7 @@ ops:
           start_dim: 1
       - cluster:
           method: kmeans
-          num_clusters: 4096
+          num_clusters: 65536
           distance: euclidean
           to_fields_with_prefix: f_rest_
 
@@ -114,12 +110,10 @@ ops:
 
   - input_fields: [f_rest_labels]
     transforms:
-      - remapping:
-          method: channelwise-minmax
+      - simple_quantize:
           min: 0
           max: 65535
           dim: 2
-      - to_dtype:
           dtype: uint16
           round_to_int: true
       - split_bytes:
@@ -128,12 +122,10 @@ ops:
 
   - input_fields: [f_rest_centroids]
     transforms:
-      - remapping:
-          method: channelwise-minmax
-          min: 0.0
-          max: 255.0
+      - simple_quantize:
+          min: 0
+          max: 31
           dim: 2
-      - to_dtype:
           dtype: uint8
           round_to_int: true
 
@@ -145,12 +137,10 @@ ops:
 
   - input_fields: [quaternions]
     transforms:
-      - remapping:
-          method: channelwise-minmax
+      - simple_quantize:
           min: 0
           max: 63
           dim: 2
-      - to_dtype:
           dtype: uint8
           round_to_int: true
 
@@ -164,12 +154,10 @@ ops:
     transforms:
       - remapping:
           method: log
-      - remapping:
-          method: channelwise-minmax
+      - simple_quantize:
           min: 0
           max: 63
           dim: 2
-      - to_dtype:
           dtype: uint8
           round_to_int: true
 
@@ -183,19 +171,18 @@ ops:
     transforms:
       - remapping:
           method: inverse-sigmoid
-      - remapping:
-          method: channelwise-minmax
+      - simple_quantize:
           min: 0
           max: 63
           dim: 2
-      - to_dtype:
           dtype: uint8
           round_to_int: true
 
   - input_fields: [opacities]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 0
@@ -204,7 +191,8 @@ ops:
   - input_fields: [scales]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444
@@ -214,7 +202,8 @@ ops:
       from_fields_with_prefix: means_bytes_
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444
@@ -223,7 +212,8 @@ ops:
   - input_fields: [quaternions]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444
@@ -232,16 +222,18 @@ ops:
   - input_fields: [f_dc]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
-            quality: 100
-            chroma: 420
+            quality: -1
+            chroma: 444
             matrix_coefficients: 1
 
   - input_fields: [f_rest_labels_bytes_0]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 0
@@ -250,7 +242,8 @@ ops:
   - input_fields: [f_rest_labels_bytes_1]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 0
@@ -259,7 +252,8 @@ ops:
   - input_fields: [f_rest_centroids]
     transforms:
       - write_file:
-          type: avif
+          type: image
+          image_codec: avif
           coding_params:
             quality: -1
             chroma: 444

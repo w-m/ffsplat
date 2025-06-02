@@ -1,3 +1,4 @@
+import copy
 import json
 from hashlib import sha256
 from pathlib import Path
@@ -29,7 +30,7 @@ class Operation:
         field_data: dict[str, "Field"],
         output_path: Path | None = None,
     ) -> "Operation":
-        params = transform_param
+        params = copy.deepcopy(transform_param)
         transform_type = next(iter(params))
 
         if transform_type == "write_file":

@@ -113,6 +113,11 @@ class EncodingParams:
             ops=data["ops"],
         )
 
+    def to_yaml_file(self, yaml_path: Path) -> None:
+        # Write the YAML directly using our custom dumper
+        with open(yaml_path / f"custom_{self.profile}.yaml", "w") as f:
+            yaml.dump(self, f, Dumper=SerializableDumper, default_flow_style=False, sort_keys=False)
+
 
 # Register representers for types outside the class definition
 SerializableDumper.add_representer(defaultdict, SerializableDumper.represent_defaultdict)

@@ -34,7 +34,7 @@ dependencies = [
     "torchvision>=0.21.0,<1.0.0",
     "torchmetrics>=1.6.1,<2.0.0",
     "torchpq>=0.3.0.6,<0.4.0", # kmeans clustering
-    "cupy>=13.4.1,<14.0.0", # torchpq dependency
+    "cupy-cuda12x>=13.4.1,<14.0.0", # torchpq dependency
     "camorph>=0.3.6,<1.0.0",
     "plas",
     "viser",
@@ -164,7 +164,10 @@ ignore = [
 [tool.ruff.format]
 preview = true
 
+[tool.deptry]
+extend_exclude = ["extern"]
+
 [tool.deptry.per_rule_ignores]
 # cupy required for kmeans in torchpq, but we don't import it explicitly in the code base
 # torchvision is required for torchmetrics
-DEP002 = ["cupy", "torchvision"]
+DEP002 = ["cupy-cuda12x", "torchvision"]
