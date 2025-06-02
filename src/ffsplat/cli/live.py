@@ -318,7 +318,7 @@ class InteractiveConversionTool:
             )
             self._build_options_for_transformation(dynamic_params_conf, initial_values, rebuild_fn)
 
-    def _build_options_for_transformation(self, dynamic_params_conf, initial_values, rebuild_fn):  # noqa: C901
+    def _build_options_for_transformation(self, dynamic_params_conf, initial_values, rebuild_fn):
         for item in dynamic_params_conf:
             match item:
                 case {
@@ -327,14 +327,9 @@ class InteractiveConversionTool:
                     "min": minimum_value,
                     "max": maximum_value,
                     "step": stepsize,
-                    "int_or_float": int_or_float,
+                    "dtype": to_type,
                     **params,
                 }:
-                    if int_or_float == "int":
-                        to_type = int
-                    elif int_or_float == "float":
-                        to_type = float
-
                     key = params.get("set", label)
 
                     default_value = initial_values[key]

@@ -171,7 +171,7 @@ class Cluster(Transformation):
             "min": 0,
             "max": 2**13,
             "step": 1,
-            "int_or_float": "int",
+            "dtype": int,
         })
         dynamic_params_config.append({
             "label": "distance",
@@ -734,7 +734,7 @@ class PLAS(Transformation):
             "min": 0,
             "max": 0.001,
             "step": 0.0001,
-            "int_or_float": "float",
+            "dtype": float,
         })
 
         weight_config: list[dict[str, Any]] = []
@@ -745,7 +745,7 @@ class PLAS(Transformation):
                 "min": 0.0,
                 "max": 1.0,
                 "step": 0.05,
-                "int_or_float": "float",
+                "dtype": float,
             })
         dynamic_params_config.append({
             "label": "weights",
@@ -922,7 +922,7 @@ class WriteFile(Transformation):
                             "min": 0,
                             "max": 100,
                             "step": 1,
-                            "int_or_float": "int",
+                            "dtype": int,
                         })
                     dynamic_params_config.append({
                         "label": "coding_params",
@@ -1080,7 +1080,7 @@ class SimpleQuantize(Transformation):
             "min": 1,
             "max": max_val,
             "step": 1,
-            "int_or_float": "int",
+            "dtype": int,
             "set": "max",
             "mapping": lambda x: 2**x - 1,
             "inverse_mapping": lambda x: np.log2(x + 1),
