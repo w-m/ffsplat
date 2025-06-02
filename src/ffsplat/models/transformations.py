@@ -68,6 +68,15 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
                 chroma=coding_params.get("chroma", 444),
                 matrix_coefficients=coding_params.get("matrix_coefficients", 0),
             )
+        case "webp":
+            Image.fromarray(field_data.cpu().numpy()).save(
+                output_file_path,
+                format="WEBP",
+                quality=coding_params.get("quality", 100),
+                lossless=coding_params.get("lossless", False),
+                method=coding_params.get("method", 6),
+                exact=coding_params.get("exact", False),
+            )
         case _:
             raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -456,6 +465,36 @@ class Reshape(Transformation):
         return new_fields, decoding_update
 
 
+class Pack(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        match params:
+            case {"multiple": multiple}:
+                # /num clusters / 3
+                multiple = params.get("mutliple", 64)
+                length = params.get("length", 1)
+                field_data = field_data.reshape((-1, int(length * multiple), 3))
+            case _:
+                raise ValueError(f"Unknown Pack parameters: {params}")
+        decoding_update.append({
+            "input_fields": [field_name],
+            "transforms": [{"pack": {"multiple": multiple, "length": length}}],
+        })
+        new_fields[field_name] = Field(field_data, parentOp)
+        return new_fields, decoding_update
+
+
 class Permute(Transformation):
     @staticmethod
     @override
@@ -601,6 +640,37 @@ class Reindex(Transformation):
             case _:
                 raise ValueError(f"Unknown Reindex parameters: {params}")
 
+        return new_fields, decoding_update
+
+
+class Sort(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        if field_data is None:
+            raise ValueError("Field data is None before lexicographic sorting")
+        match params:
+            case {"method": "lexicographic"}:
+                sorted_indices = np.lexsort(field_data.cpu().numpy())
+            case {"method": "argsort"}:
+                sorted_indices = torch.argsort(field_data).cpu().numpy()
+            case _:
+                raise ValueError(f"Unknown Sort parameters: {params}")
+        # sorted_indices = sorted_indeces.reshape(params.get("shape",(64,-1)))
+        # new_fields[field_name] = Field(field_data_sorted, parentOp)
+        new_fields["to_field"] = Field(sorted_indices, parentOp)
+
+        # TODO: decoding update???
         return new_fields, decoding_update
 
 
@@ -800,6 +870,9 @@ class Combine(Transformation):
                     field_data = torch.stack(tensors, dim=dim)
                 elif method == "concat":
                     field_data = torch.cat(tensors, dim=dim)
+                elif method == "concat-zeros":
+                    zeros = torch.zeros(tensors[0].shape, dtype=tensors[0].dtype, device=tensors[0].device)
+                    field_data = torch.cat(tensors + zeros, dim=dim)
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
                 new_fields[to_field_name] = Field(field_data, parentOp)
@@ -1104,9 +1177,11 @@ transformation_map = {
     "to_dtype": ToDType,
     "split_bytes": SplitBytes,
     "reindex": Reindex,
+    "sort": Sort,
     "plas": PLAS,
     "lookup": Lookup,
     "combine": Combine,
+    "pack": Pack,
     "write_file": WriteFile,
     "read_file": ReadFile,
     "simple_quantize": SimpleQuantize,
