@@ -720,11 +720,6 @@ class PLAS(Transformation):
 
         dynamic_params_config: list[dict[str, Any]] = []
         dynamic_params_config.append({
-            "label": "prune_by",
-            "type": "dropdown",
-            "values": field_names,
-        })
-        dynamic_params_config.append({
             "label": "scaling_fn",
             "type": "dropdown",
             "values": scaling_functions,
