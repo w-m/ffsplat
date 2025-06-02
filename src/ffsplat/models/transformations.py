@@ -166,12 +166,15 @@ class Cluster(Transformation):
         """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
         dynamic_params_config: list[dict[str, Any]] = []
         dynamic_params_config.append({
-            "label": "num_clusters",
+            "label": "#clusters",
             "type": "number",
-            "min": 0,
-            "max": 2**13,
+            "min": 1,
+            "max": 16,
             "step": 1,
             "dtype": int,
+            "set": "num_clusters",
+            "mapping": lambda x: 2**x,
+            "inverse_mapping": lambda x: np.log2(x),
         })
         dynamic_params_config.append({
             "label": "distance",
