@@ -195,9 +195,13 @@ class InteractiveConversionTool:
                 scene=encoding_params.scene,
             ),
         )
-        encoder.encode(verbose=self.verbose)
-        self.viewer._convert_button.disabled = False
+        try:
+            encoder.encode(verbose=self.verbose)
+        except Exception:
+            self.viewer._convert_button.disabled = False
+            raise
 
+        self.viewer._convert_button.disabled = False
         # add scene to scene list and load it to view the scene
         output_format = self.viewer._output_dropdown.value
         self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
