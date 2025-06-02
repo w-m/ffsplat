@@ -1,0 +1,298 @@
+profile: SOG-canvas
+profile_version: 0.1
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+ops:
+  - input_fields: [sh]
+    transforms:
+      - split:
+          to_field_list: [sh0, shN] #in sogs f_dc=sh0, frest=shN
+          split_size_or_sections: [1, 15]
+          dim: 1
+          squeeze: false
+          #TODO: in sogs transpose (1,2) is done after reading from .ply here not?
+
+  - input_fields: [means]
+    transforms:
+      - remapping:
+          method: signed-log
+          to_field: means
+  #- input_fields: [quaternions]
+  #transforms:
+  #-
+  - input_fields: [means, sh0, shN, opacities, scales, quaternions]
+    transforms:
+      - plas:
+          prune_by: opacities #isn't done in SOG-canvas
+          scaling_fn: none #standardize
+          # activated: true
+          shuffle: true
+          improvement_break: 1e-4
+          to_field: sorted_indices
+          weights:
+            means: 1.0
+            sh0: 1.0
+            shN: 0.0 #shN not in sortkeys
+            opacities: 0.0
+            scales: 1.0
+            quaternions: 1.0
+
+  #means
+  - input_fields: [means, sorted_indices]
+    transforms:
+      - reindex:
+          to_field: means_reindexed
+          indices_field: sorted_indices
+
+  - input_fields: [means_reindexed]
+    transforms:
+      - remapping:
+          method: channelwise-minmax
+          min: 0 #for dyncamic minmax
+          max: 1
+          dim: 2
+      - to_dtype:
+          dtype: uint16
+          round_to_int: true
+      - split_bytes:
+          to_fields_with_prefix: means_bytes_
+          num_bytes: 2
+
+  - input_fields: [means_bytes_0]
+    transforms:
+      -to_dtype:
+        dtype: uint8
+        round_to_int: false
+        to_field: means_l
+
+  - input_fields: [means_bytes_1]
+    transforms:
+      -to_dtype:
+        dtype: uint8
+        round_to_int: false
+        to_field: means_u
+
+  #scales
+  - input_fields: [scales, sorted_indices]
+    transforms:
+      - reindex:
+          to_field: scales
+          indices_field: sorted_indices
+
+  - input_fields: [scales]
+    transforms:
+      - remapping:
+          method: channelwise-minmax
+          min: 0 #for dyncamic minmax
+          max: 1
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities, sorted_indices]
+    transforms:
+      - reindex:
+          indices_field: sorted_indices
+
+  - input_fields: [sh0, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: sh0
+          index_field: sorted_indices
+
+  - input_fields: [shN, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: shN
+          index_field: sorted_indices
+
+  #opacity-sh0 rgba
+  - input_fields: [opacities, sh0]
+    transforms:
+      - combine:
+          method: concat
+          dim: -1
+          to_field: sh0
+
+  - input_fields: [sh0]
+    transforms:
+      - remapping:
+          method: channelwise-minmax
+          min: 0
+          max: 255
+          dim: 2
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+  #shN
+  - input_fields: [shN]
+    transforms:
+      #TODO: reshaping?
+      - reshape:
+          to_shape: [15, -1] #params.shape[0],-1 (shN)
+      - permute:
+          dims: [2, 1, 0] # probably incorrect
+      - permute:
+          dims: [1, 0] # in sog-web 0,2,1
+      - cluster:
+          method: kmeans
+          num_clusters: 4096 #TODO: is dynamic in sogs
+          distance: manhattan
+          to_fields_with_prefix: shN_
+
+  - input_fields: [shN_centroids]
+    transfroms:
+      - permute:
+          to_shape: [1, 0]
+      - remapping:
+          method: minmax
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [shN_centroids]
+    transforms:
+      - permute:
+          dims: [2, 1, 0] #transpose in sogs
+          to_field: shN_centroids_transposed
+
+  - input_fields: [shN_centroids_transposed]
+    transforms:
+      - sort:
+        method: lexsort
+        to_field: shN_centroids_indices
+
+  - input_fields: [shN_centroids_indices]
+    transforms:
+      - permute:
+          dims: [0, 1] #TODO: make this sequence simple
+      - reshape:
+          to_shape: [64, -1]
+      - permute:
+          dims: [0, 1]
+      - reshape:
+          to_shape: [-1]
+
+  - input_fields: [shN_centroids, shN_centroids_indices]
+    transforms:
+      - reindex:
+          src_field: shN_centroids
+          index_field: shN_centroids_indices
+
+  - input_fields: [shN_centroids]
+    transforms:
+      - pack:
+        multiple: 64
+        length: 15 #should be dynamic based number of spherical harmonics ShN parameters?
+        to_field: shN_centroids
+
+  - input_fields: [shN_centroids_indices]
+    transforms:
+      - sort:
+          method: argsort
+          to_field: shN_centroids_indices_sorted_inverse
+
+  - input_fields: [shN_labels, shN_centroids_indices_sorted_inverse]
+    transforms:
+      - reindex:
+          src_field: shN_labels
+          index_field: shN_centroids_indices_sorted_inverse
+
+  - input_fields: [shN_labels]
+    transfroms:
+      - remapping:
+        #reindex (inverse)
+        to_dtype:
+          dtype: uint16
+          round_to_int: False
+        reshape:
+          to_shape: [n_sidelen, n_sidelen]
+        split_bytes:
+          to_fields_with_prefix: shN_labels_
+          num_bytes: 2
+  - input_fields: [shN_labels_0, shN_labels_1]
+    transforms:
+      - combine:
+          method: concat-zeros
+          dim: 2
+          to_field: shN_labels
+      - to_dtype:
+          dtype: uint8
+          round_to_int: true
+      # add zeros in 3rd dimension
+      # map to unit
+#img file outputs, sogs uses lossless webp, sog uses avif
+outputs:
+  - input_fields: [means_l]
+    transforms:
+      - write_file:
+        type: webp
+        coding_params:
+          lossless: true
+          quality: 100
+          method: 6
+          exact: true
+
+  - input_fields: [means_u]
+    transforms:
+      - write_file:
+        type: webp
+        coding_params:
+          lossless: true
+          quality: 100
+          method: 6
+          exact: true
+
+  - input_fields: [scales] #TODO: CHECK, if it is rgba
+    transforms:
+      - write_file:
+        type: webp
+        coding_params:
+          lossless: true
+          quality: 100
+          method: 6
+          exact: true
+
+  - input_fields: [sh0] #TODO: CHECK, if it is rgba
+    transforms:
+      - write_file:
+        type: webp
+        coding_params:
+          lossless: true
+          quality: 100
+          method: 6
+          exact: true
+
+  - input_fields: [shN_centroids] #rgb
+    transforms:
+      - write_file:
+        type: webp
+        coding_params:
+          lossless: true
+          quality: 100
+          method: 6
+          exact: true
+
+  - input_fields: [shN_labels] #rgb
+    transforms:
+      - write_file:
+        type: webp
+        coding_params:
+          lossless: true
+          quality: 100
+          method: 6
+          exact: true
+#Done: means,scales, opacities, sh0, shN, lexsort, argsort, output webp
+#TODO: dynamic number of clusters
+#TODO: quaternions
+# check reshaping and transposes
+# TODO: side_len grid reshaping?-> doen by sorting topk already?, meta-data sogs, meta-data ffsplat

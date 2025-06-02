@@ -201,6 +201,8 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-nosh.yaml"))
         case "SOG-web-sh-split":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-sh-split.yaml"))
+        case "SOG-canvas":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-canvas.yaml"))
         case _:
             raise ValueError(f"Unsupported output format: {output_format}")
 
