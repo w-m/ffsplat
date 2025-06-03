@@ -78,9 +78,9 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
                 output_file_path,
                 format="WEBP",
                 quality=coding_params.get("quality", 100),
-                lossless=coding_params.get("lossless", False),
+                lossless=coding_params.get("lossless", True),
                 method=coding_params.get("method", 6),
-                exact=coding_params.get("exact", False),
+                exact=coding_params.get("exact", True),
             )
         case _:
             raise ValueError(f"Unsupported file type: {file_type}")
@@ -877,7 +877,8 @@ class Combine(Transformation):
                     field_data = torch.cat(tensors, dim=dim)
                 elif method == "concat-zeros":
                     zeros = torch.zeros(tensors[0].shape, dtype=tensors[0].dtype, device=tensors[0].device)
-                    field_data = torch.cat(tensors + zeros, dim=dim)
+                    tensors.append(zeros)
+                    field_data = torch.cat(tensors, dim=dim)
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
                 new_fields[to_field_name] = Field(field_data, parentOp)
