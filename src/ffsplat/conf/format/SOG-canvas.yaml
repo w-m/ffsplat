@@ -118,6 +118,12 @@ ops:
           src_field: sh0
           index_field: sorted_indices
 
+  - input_fields: [shN, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: shN
+          index_field: sorted_indices
+
   - input_fields: [opacities]
     transforms:
       - reshape:
@@ -141,59 +147,50 @@ ops:
           round_to_int: true
 
   ##shN
-  #- input_fields: [shN]
-  #transforms:
-  ##TODO: reshaping?
-  #- reshape:
-  #to_shape: [15, -1] #params.shape[0],-1 (shN)
-  #- permute:
-  #dims: [2, 1, 0] # probably incorrect
-  #- permute:
-  #dims: [1, 0] # in sog-web 0,2,1
-  #- cluster:
-  #method: kmeans
-  #num_clusters: 4096 #TODO: is dynamic in sogs
-  #distance: manhattan
-  #to_fields_with_prefix: shN_
+  - input_fields: [shN]
+    transforms:
+      - reshape:
+          shape: [-1, 45] # 3*15 spherical harmonics
+      - cluster:
+          method: kmeans
+          num_clusters: 65536 #TODO: is dynamic in sogs
+          distance: manhattan
+          to_fields_with_prefix: shN_
 
-  #- input_fields: [shN_centroids]
-  #transfroms:
-  #- permute:
-  #to_shape: [1, 0]
-  #- remapping:
-  #method: minmax
-  #- to_dtype:
-  #dtype: uint8
-  #round_to_int: true
+  - input_fields: [shN_centroids]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2 #dummy dim
+          dtype: uint8
+          round_to_int: true
 
-  #- input_fields: [shN_centroids]
-  #transforms:
-  #- permute:
-  #dims: [2, 1, 0] #transpose in sogs
-  #to_field: shN_centroids_transposed
+  - input_fields: [shN_centroids]
+    transforms:
+      - sort:
+          method: lexicographic
+          to_field: shN_centroids_indices
 
-  #- input_fields: [shN_centroids_transposed]
-  #transforms:
-  #- sort:
-  #method: lexsort
-  #to_field: shN_centroids_indices
+  - input_fields: [shN_centroids_indices]
+    transforms:
+      - reshape:
+          start_dim: 1
+          shape: [1]
+      #- permute:
+      #dims: [1, 0] #TODO: make this sequence simple
+      #- reshape:
+      #shape: [64, -1]
+      #- permute:
+      #dims: [1, 0]
+      #- reshape:
+      #shape: [-1]
 
-  #- input_fields: [shN_centroids_indices]
-  #transforms:
-  #- permute:
-  #dims: [0, 1] #TODO: make this sequence simple
-  #- reshape:
-  #to_shape: [64, -1]
-  #- permute:
-  #dims: [0, 1]
-  #- reshape:
-  #to_shape: [-1]
-
-  #- input_fields: [shN_centroids, shN_centroids_indices]
-  #transforms:
-  #- reindex:
-  #src_field: shN_centroids
-  #index_field: shN_centroids_indices
+  - input_fields: [shN_centroids, shN_centroids_indices]
+    transforms:
+      - reindex:
+          src_field: shN_centroids
+          index_field: shN_centroids_indices
 
   #- input_fields: [shN_centroids]
   #transforms:
