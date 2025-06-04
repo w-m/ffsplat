@@ -175,7 +175,7 @@ class InteractiveConversionTool:
                 self.conversion_queue.append(copy.deepcopy(self.encoding_params))
                 self.viewer.eval_button.disabled = True
 
-                # we only want to work on one conversion simultaniously
+                # we only want to work on one conversion simultaneously
                 if self.conversion_running:
                     return
                 else:
