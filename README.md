@@ -8,6 +8,8 @@
 
 ffsplat is a powerful framework to convert and compress 3D Gaussian Splatting scenes.
 
+**NOTE: this code is pre-alpha, under heavy development, a community developer preview. Please expect more documentation in the coming weeks (July 2025).**
+
 - **Github repository**: <https://github.com/w-m/ffsplat/>
 
 ## Quick Start
