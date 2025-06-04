@@ -227,12 +227,14 @@ class Viewer:
             self.eval_progress.visible = False
             self.eval_table = self.server.gui.add_html("")
 
-    def add_convert(self, reset_dynamic_params_gui_fn: Callable, convert_fn: Callable):
+    def add_convert(self, reset_dynamic_params_gui_fn: Callable, convert_fn: Callable, live_preview_fn: Callable):
         with self.tab_group.add_tab("Convert") as self.convert_tab:
             self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
             self._output_dropdown.on_update(reset_dynamic_params_gui_fn)
             self._convert_button = self.server.gui.add_button("Convert")
             self._convert_button.on_click(convert_fn)
+            self._live_preview_checkbox = self.server.gui.add_checkbox("live preview", False)
+            self._live_preview_checkbox.on_update(live_preview_fn)
         reset_dynamic_params_gui_fn(None)
 
     def add_to_scene_tab(
