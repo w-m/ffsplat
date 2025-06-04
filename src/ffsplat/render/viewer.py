@@ -5,8 +5,8 @@ import dataclasses
 import io
 import sys
 import time
-from collections.abc import Callable
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
 from typing import Literal

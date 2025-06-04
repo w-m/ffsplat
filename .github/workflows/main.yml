@@ -54,7 +54,6 @@ jobs:
       - name: Check typing
         run: uv run mypy
 
-
   # TODO: re-enable documentation checks when we start documentation
   # check-docs:
   #   runs-on: ubuntu-latest
@@ -63,7 +62,6 @@ jobs:
   #       uses: actions/checkout@v4
   #      with:
   #        submodules: true
-
 
   #     - name: Set up the environment
   #       uses: ./.github/actions/setup-python-env
