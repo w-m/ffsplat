@@ -202,10 +202,8 @@ class InteractiveConversionTool:
         output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
         if self.viewer._live_preview_checkbox.value:
             # clear previous live preview
-            if output_path.exists():
-                for file in output_path.iterdir():
-                    file.unlink()
-                output_path.rmdir()
+            if output_path.exists() and output_path.is_dir():
+                shutil.rmtree(output_path)
             if self.preview_in_scenes:
                 self.remove_last_scene()
             else:
