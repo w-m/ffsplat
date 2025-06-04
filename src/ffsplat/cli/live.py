@@ -159,14 +159,17 @@ class InteractiveConversionTool:
                     self.remove_last_scene()
                 output_format = self.viewer._output_dropdown.value
                 output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
+                preview_path = Path(self.temp_dir.name + "/livepreview")
+                if not os.path.exists(output_path):
+                    os.makedirs(output_path)
+                shutil.copytree(preview_path, output_path, dirs_exist_ok=True)
                 self._add_scene(
                     self._build_description(self.encoding_params, output_format),
                     output_path,
                     "smurfx",
                     copy.deepcopy(self.encoding_params),
                 )
-                output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
-                self._add_scene("Live preview from conversion", output_path, "smurfx", self.encoding_params)
+                self._add_scene("Live preview from conversion", preview_path, "smurfx", self.encoding_params)
                 return
             if from_update and not self.viewer._live_preview_checkbox.value:
                 return
@@ -202,11 +205,13 @@ class InteractiveConversionTool:
         output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
         if self.viewer._live_preview_checkbox.value:
             # clear previous live preview
+            output_path = Path(self.temp_dir.name + "/livepreview")
+            if output_path.exists() and output_path.is_dir():
+                shutil.rmtree(output_path)
             if self.preview_in_scenes:
                 self.remove_last_scene()
             else:
                 self.preview_in_scenes = True
-            output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
 
         encoder = SceneEncoder(
             encoding_params=encoding_params,
@@ -235,11 +240,7 @@ class InteractiveConversionTool:
                 self._build_description(encoding_params, output_format), output_path, "smurfx", encoding_params
             )
         else:
-            output_format = self.viewer._output_dropdown.value
-            self._add_scene(
-                self._build_description(encoding_params, output_format), output_path, "smurfx", encoding_params
-            )
-            # self._add_scene("Live preview from conversion", output_path, "smurfx", encoding_params)
+            self._add_scene("Live preview from conversion", output_path, "smurfx", encoding_params)
         self.viewer.rerender(None)
 
     def _add_scene(self, description, data_path, input_format, encoding_params):
@@ -443,10 +444,6 @@ class InteractiveConversionTool:
     def reset_dynamic_params_gui(self, _):
         self._load_encoding_params()
         self._build_convert_options()
-        if self.viewer._live_preview_checkbox and self.preview_in_scenes:
-            output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes) - 1}")
-            if output_path.exists() and output_path.is_dir():
-                shutil.rmtree(output_path)
         self.conversion_wrapper(None, True)
 
     def _load_encoding_params(self):
