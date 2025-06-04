@@ -203,6 +203,8 @@ class InteractiveConversionTool:
         if self.viewer._live_preview_checkbox.value:
             # clear previous live preview
             if output_path.exists():
+                for file in output_path.iterdir():
+                    file.unlink()
                 output_path.rmdir()
             if self.preview_in_scenes:
                 self.remove_last_scene()
