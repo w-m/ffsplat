@@ -137,7 +137,7 @@ class InteractiveConversionTool:
 
         self.viewer.add_convert(self.reset_dynamic_params_gui, self.conversion_wrapper, self.live_preview_callback)
 
-        self._add_scene("input", input_path, input_format)
+        self._add_scene("input", input_path, input_format, None)
 
         self.conversion_queue: list[EncodingParams] = []
         self.conversion_running: bool = False
@@ -160,8 +160,13 @@ class InteractiveConversionTool:
                     self.remove_last_scene()
                 output_format = self.viewer._output_dropdown.value
                 output_path = Path(self.temp_dir.name + "/gaussians_live_preview")
-                self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
-                self._add_scene("Live preview from conversion", output_path, "smurfx")
+                self._add_scene(
+                    self._build_description(self.encoding_params, output_format),
+                    output_path,
+                    "smurfx",
+                    copy.deepcopy(self.encoding_params),
+                )
+                self._add_scene("Live preview from conversion", output_path, "smurfx", self.encoding_params)
                 return
             if from_update and not self.viewer._live_preview_checkbox.value:
                 return
@@ -180,30 +185,29 @@ class InteractiveConversionTool:
 
             while True:
                 with self.lock_queue:
-                    if self.conversion_queue:
-                        encoding_params = self.conversion_queue.pop()
-                        self.conversion_queue.clear()
-                    else:
+                    if not self.conversion_queue:
                         self.viewer._convert_button.disabled = False
                         self.viewer._live_preview_checkbox.disabled = False
                         self.viewer.eval_button.disabled = False
                         self.conversion_running = False
                         break
+                    encoding_params = self.conversion_queue.pop()
+                    self.conversion_queue.clear()
                 self.viewer.scene_label.content = "Running conversion for live preview..."
                 self.convert(encoding_params)
                 self.viewer.scene_label.content = "Showing live preview"
 
     def convert(self, encoding_params: EncodingParams):
         print("Converting scene...")
+        output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
         if self.viewer._live_preview_checkbox.value:
-            output_path = Path(self.temp_dir.name + "/gaussians_live_preview")
             # clear previous live preview
             if output_path.exists():
-                for file_path in output_path.iterdir():
-                    if file_path.is_file():
-                        file_path.unlink()
-        else:
-            output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
+                output_path.rmdir()
+            if self.preview_in_scenes:
+                self.remove_last_scene()
+            else:
+                self.preview_in_scenes = True
 
         encoder = SceneEncoder(
             encoding_params=encoding_params,
@@ -228,23 +232,25 @@ class InteractiveConversionTool:
 
         if not self.viewer._live_preview_checkbox.value:
             output_format = self.viewer._output_dropdown.value
-            self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
+            self._add_scene(
+                self._build_description(encoding_params, output_format), output_path, "smurfx", encoding_params
+            )
         else:
-            if self.preview_in_scenes:
-                self.remove_last_scene()
-            else:
-                self.preview_in_scenes = True
-            self._add_scene("Live preview from conversion", output_path, "smurfx")
+            output_format = self.viewer._output_dropdown.value
+            self._add_scene(
+                self._build_description(encoding_params, output_format), output_path, "smurfx", encoding_params
+            )
+            # self._add_scene("Live preview from conversion", output_path, "smurfx", encoding_params)
         self.viewer.rerender(None)
 
-    def _add_scene(self, description, data_path, input_format):
+    def _add_scene(self, description, data_path, input_format, encoding_params):
         self.scenes.append(
             SceneData(
                 id=len(self.scenes),
                 description=description,
                 data_path=data_path,
                 input_format=input_format,
-                encoding_params=copy.deepcopy(self.encoding_params),
+                encoding_params=copy.deepcopy(encoding_params),
             )
         )
         self.viewer.add_to_scene_tab(
@@ -289,7 +295,8 @@ class InteractiveConversionTool:
         params_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/encoding_params")
         if not os.path.exists(params_path):
             os.makedirs(params_path)
-        self.scenes[scene_id].encoding_params.to_yaml_file(params_path)
+        if self.scenes[scene_id].encoding_params:
+            self.scenes[scene_id].encoding_params.to_yaml_file(params_path)
 
     def _load_scene(self, scene_id):
         print(f"Loading scene {scene_id}...")
@@ -482,6 +489,8 @@ class InteractiveConversionTool:
         metrics = defaultdict(list)
 
         imgs_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/imgs")
+        if self.viewer._live_preview_checkbox.value and scene_id == len(self.scenes) - 1:
+            imgs_path = None
 
         for i, data in enumerate(valloader):
             elapsed_time += eval_step(
