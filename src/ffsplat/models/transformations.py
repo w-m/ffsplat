@@ -1,8 +1,9 @@
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, override
+from typing import TYPE_CHECKING, Any, override
 
 import cv2
 import numpy as np
@@ -158,7 +159,7 @@ class Cluster(Transformation):
                     ],
                 })
             case _:
-                raise ValueError(f"Unknown clustering method: {params['method']}")
+                raise ValueError(f"Unknown clustering method: {params["method"]}")
         return new_fields, decoding_update
 
     @staticmethod
@@ -206,7 +207,7 @@ class Split(Transformation):
                 "to_field_list": to_field_list,
             }:
                 chunks = field_data.split(split_size_or_sections, dim)
-                for target_field_name, chunk in zip(to_field_list, chunks):
+                for target_field_name, chunk in zip(to_field_list, chunks, strict=False):
                     if squeeze:
                         chunk = chunk.squeeze(dim)
                     new_fields[target_field_name] = Field(chunk, parentOp)
@@ -942,7 +943,7 @@ class WriteFile(Transformation):
                         coding_params.clear()
 
                 case _:
-                    raise ValueError(f"unknown image codec: {params['image_codec']}")
+                    raise ValueError(f"unknown image codec: {params["image_codec"]}")
 
         return dynamic_params_config
 
@@ -1077,7 +1078,7 @@ class SimpleQuantize(Transformation):
             case "uint32":
                 max_val = 32
             case _:
-                raise ValueError(f"Incompatible dtype {params['dtype']}")
+                raise ValueError(f"Incompatible dtype {params["dtype"]}")
 
         dynamic_params_config.append({
             "label": "n bits",

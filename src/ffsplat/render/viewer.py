@@ -6,9 +6,10 @@ import io
 import sys
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
 import viser
@@ -45,7 +46,7 @@ class CameraState:
 
 @dataclasses.dataclass
 class ViewerState:
-    num_train_rays_per_sec: Optional[float] = None
+    num_train_rays_per_sec: float | None = None
     num_view_rays_per_sec: float = 100000.0
     status: Literal["rendering", "preparing", "training", "paused", "completed"] = "rendering"
 
@@ -83,10 +84,7 @@ class Viewer:
         server: viser.ViserServer,
         render_fn: Callable[
             [CameraState, tuple[int, int]],
-            Union[
-                UInt8[np.ndarray, "H W 3"],
-                tuple[UInt8[np.ndarray, "H W 3"], Optional[Float32[np.ndarray, "H W"]]],
-            ],
+            UInt8[np.ndarray, "H W 3"] | tuple[UInt8[np.ndarray, "H W 3"], Float32[np.ndarray, "H W"] | None],
         ],
         mode: Literal["rendering", "training"] = "rendering",
     ):

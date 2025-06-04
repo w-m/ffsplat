@@ -59,7 +59,7 @@ class Renderer(threading.Thread):
 
         self._render_event = threading.Event()
         self._state: RenderState = "low_static"
-        self._task: Optional[RenderTask] = None
+        self._task: RenderTask | None = None
 
         self._target_fps = 30
         self._may_interrupt_render = False
