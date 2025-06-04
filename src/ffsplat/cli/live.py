@@ -183,6 +183,7 @@ class InteractiveConversionTool:
                     break
             self.viewer.scene_label.content = "Running conversion for live preview..."
             self.convert(encoding_params)
+            self.viewer.scene_label.content = "Showing live preview"
 
     def convert(self, encoding_params: EncodingParams):
         print("run conversion")
@@ -209,8 +210,11 @@ class InteractiveConversionTool:
                 scene=encoding_params.scene,
             ),
         )
-        # TODO: correctly handle exception: print message and return from this function.
-        encoder.encode(verbose=self.verbose)
+        try:
+            encoder.encode(verbose=self.verbose)
+        except Exception as e:
+            print(f"Exception occured: {e}")
+            return
 
         # add scene to scene list and load it to view the scene
 
@@ -221,7 +225,6 @@ class InteractiveConversionTool:
             # TODO: load scene correctly. we need to integrate it into the evaluation as well
             self.gaussians = decode_gaussians(output_path, input_format="smurfx", verbose=self.verbose).to("cuda")
             self.viewer.rerender(None)
-            self.viewer.scene_label.content = "Showing live preview"
 
     def _add_scene(self, description, data_path, input_format):
         self.scenes.append(
