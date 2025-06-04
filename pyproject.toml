@@ -65,7 +65,7 @@ Documentation = "https://w-m.github.io/ffsplat/"
 ffsplat-convert = "ffsplat.cli.convert:main"
 ffsplat-view = "ffsplat.cli.view:main"
 # ffsplat-probe = "ffsplat.cli.probe:main"
-# ffsplat-live = "ffsplat.cli.live:main"
+ffsplat-live = "ffsplat.cli.live:main"
 # ffsplat-eval = "ffsplat.cli.eval:main"
 # ffsplat-opt = "ffsplat.cli.opt:main"
 

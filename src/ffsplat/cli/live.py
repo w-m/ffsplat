@@ -530,21 +530,7 @@ class InteractiveConversionTool:
         )
 
 
-def main(parser: ArgumentParser):
-    cfg = parser.parse_args()
-    InteractiveConversionTool(
-        input_path=cfg.input,
-        input_format=cfg.input_format,
-        dataset_path=cfg.dataset_path,
-        results_path=cfg.results_path,
-        verbose=cfg.verbose,
-    )
-
-    print("Viewer running... Ctrl+C to exit.")
-    time.sleep(100000)
-
-
-if __name__ == "__main__":
+def main():
     parser = ArgumentParser(description="Interactive compression tool parameters")
     parser.add_argument("--input", type=Path, required=True, help="Input file or directory path")
     # TODO: add support for guessing input format
@@ -559,4 +545,18 @@ if __name__ == "__main__":
     parser.add_argument("--results-path", type=Path, required=False, help="Path to save images from evaluation")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
-    main(parser)
+    cfg = parser.parse_args()
+    InteractiveConversionTool(
+        input_path=cfg.input,
+        input_format=cfg.input_format,
+        dataset_path=cfg.dataset_path,
+        results_path=cfg.results_path,
+        verbose=cfg.verbose,
+    )
+
+    print("Viewer running... Ctrl+C to exit.")
+    time.sleep(100000)
+
+
+if __name__ == "__main__":
+    main()
