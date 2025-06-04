@@ -145,6 +145,11 @@ class InteractiveConversionTool:
         # self.viewer.add_test_functionality(self.change_scene)
 
     def conversion_wrapper(self, _, from_update: bool = False):
+        if not from_update and self.viewer._live_preview_checkbox:
+            output_format = self.viewer._output_dropdown.value
+            output_path = Path(self.temp_dir.name + "/gaussians_live_preview")
+            self._add_scene(self._build_description(self.encoding_params, output_format), output_path, "smurfx")
+            return
         if from_update and not self.viewer._live_preview_checkbox.value:
             return
 
@@ -183,6 +188,11 @@ class InteractiveConversionTool:
         print("run conversion")
         if self.viewer._live_preview_checkbox.value:
             output_path = Path(self.temp_dir.name + "/gaussians_live_preview")
+            # clear previous live preview
+            if output_path.exists():
+                for file_path in output_path.iterdir():
+                    if file_path.is_file():
+                        file_path.unlink()
         else:
             output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
 
@@ -287,7 +297,8 @@ class InteractiveConversionTool:
         self.gaussians = decode_gaussians(scene.data_path, input_format=scene.input_format, verbose=self.verbose).to(
             "cuda"
         )
-        self.deactivate_live_preview()
+        if self.viewer._live_preview_checkbox.value:
+            self.deactivate_live_preview()
 
         self.viewer.rerender(None)
 
@@ -314,6 +325,7 @@ class InteractiveConversionTool:
         self,
     ):
         self.viewer._live_preview_checkbox.value = False
+        # TODO: is this necessary?
         self.live_preview_callback(None)
 
     def _build_transform_folder(self, transform_folder, description, transformation, transform_type):
@@ -582,11 +594,13 @@ class InteractiveConversionTool:
 
     def live_preview_callback(self, _):
         print("running live preview callback")
-        if not self.viewer._live_preview_checkbox:
+        if not self.viewer._live_preview_checkbox.value:
             self.current_scene = len(self.scenes) - 1
             self._load_scene(len(self.scenes) - 1)
+            self.viewer._convert_button.label = "Convert"
         else:
             self.current_scene = -1
+            self.viewer._convert_button.label = "Save to scene list"
         self.conversion_wrapper(None, True)
 
 
