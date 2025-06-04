@@ -240,7 +240,7 @@ class Viewer:
     def add_to_scene_tab(
         self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable, save_params_fn: Callable
     ):
-        with self.scenes_tab, self.server.gui.add_folder(f"Scene {scene_id}"):
+        with self.scenes_tab, self.server.gui.add_folder(f"Scene {scene_id}") as self.last_scene_folder:
             self.server.gui.add_markdown(description)
             load_button = self.server.gui.add_button("Load scene")
             load_button.on_click(lambda _: load_fn(scene_id))
