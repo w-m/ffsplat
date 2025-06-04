@@ -48,7 +48,7 @@ class SerializableDumper(yaml.SafeDumper):
         """Special representation for lists based on content."""
         sequence = self.represent_sequence("tag:yaml.org,2002:seq", data)
         # Use flow style for lists that contain only numbers
-        if all(isinstance(item, (int, float)) for item in data):
+        if all(isinstance(item, int | float) for item in data):
             sequence.flow_style = True
         # Use flow style for lists that contain only strings
         if all(isinstance(item, str) for item in data):

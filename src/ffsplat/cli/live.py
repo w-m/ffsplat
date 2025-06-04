@@ -5,10 +5,11 @@ import tempfile
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import torch
 import viser
@@ -70,11 +71,11 @@ def create_update_field_from_bool(
 
 def get_table_row(scene, scene_metrics: dict[str, float | int]) -> str:
     table_row = f"<tr><td>{scene}</td>"
-    table_row += f"<td>{scene_metrics['psnr']:.3f}</td>"
-    table_row += f"<td>{scene_metrics['ssim']:.4f}</td>"
-    table_row += f"<td>{scene_metrics['lpips']:.3f}</td>"
-    table_row += f"<td>{scene_metrics['size'] / 1024 / 1024:.3f}</td>"
-    table_row += f"<td>{scene_metrics['num_GS']}</td>"
+    table_row += f"<td>{scene_metrics["psnr"]:.3f}</td>"
+    table_row += f"<td>{scene_metrics["ssim"]:.4f}</td>"
+    table_row += f"<td>{scene_metrics["lpips"]:.3f}</td>"
+    table_row += f"<td>{scene_metrics["size"] / 1024 / 1024:.3f}</td>"
+    table_row += f"<td>{scene_metrics["num_GS"]}</td>"
     table_row += "</tr>"
     return table_row
 
@@ -237,7 +238,7 @@ class InteractiveConversionTool:
                         changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
                     else:
                         changed_params_desc += (
-                            f"input fields from prefix: {op['input_fields']['from_fields_with_prefix']}\n"
+                            f"input fields from prefix: {op["input_fields"]["from_fields_with_prefix"]}\n"
                         )
                     changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
 
@@ -418,10 +419,10 @@ class InteractiveConversionTool:
                     transform_folder = self.viewer.server.gui.add_folder(transform_type)
                     self.viewer.convert_gui_handles.append(transform_folder)
                     if isinstance(operation["input_fields"], list):
-                        description = f"input fields: {operation['input_fields']}"
+                        description = f"input fields: {operation["input_fields"]}"
                     else:
                         description = (
-                            f"input fields from prefix: {operation['input_fields']['from_fields_with_prefix']}"
+                            f"input fields from prefix: {operation["input_fields"]["from_fields_with_prefix"]}"
                         )
 
                     self._build_transform_folder(transform_folder, description, transformation, transform_type)
