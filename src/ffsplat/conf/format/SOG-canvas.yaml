@@ -17,7 +17,7 @@ ops:
           to_field_list: [sh0, shN] #in sogs f_dc=sh0, frest=shN
           split_size_or_sections: [1, 15]
           dim: 1
-          squeeze: false
+          squeeze: true #false
           #TODO: in sogs transpose (1,2) is done after reading from .ply here not?
 
   - input_fields: [means]
@@ -28,10 +28,20 @@ ops:
   #- input_fields: [quaternions]
   #transforms:
   #-
+  - input_fields: [scales]
+    transforms:
+      - remapping:
+          method: log
+
+  - input_fields: [opacities]
+    transforms:
+      - remapping:
+          method: inverse-sigmoid
+
   - input_fields: [means, sh0, shN, opacities, scales, quaternions]
     transforms:
       - plas:
-          prune_by: opacities #isn't done in SOG-canvas
+          prune_by: opacities # in sogs purned by 0.5 of number gaussians instead
           scaling_fn: none #standardize
           # activated: true
           shuffle: true
@@ -75,59 +85,67 @@ ops:
           to_field_name: means_u
 
   #scales
-  #- input_fields: [scales, sorted_indices]
-  #transforms:
-  #- reindex:
-  #srd_field: scales
-  #index_field: sorted_indices
+  - input_fields: [scales, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: scales
+          index_field: sorted_indices
 
-  #- input_fields: [scales]
-  #transforms:
-  #- remapping:
-  #method: channelwise-minmax
-  #min: 0 #for dyncamic minmax
-  #max: 1
-  #dim: 2
-  #- to_dtype:
-  #dtype: uint8
-  #round_to_int: true
+  - input_fields: [scales]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
 
-  #- input_fields: [opacities, sorted_indices]
-  #transforms:
-  #- reindex:
-  #src_field: opacities
-  #index_field: sorted_indices
+  - input_fields: [opacities, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: opacities
+          index_field: sorted_indices
 
-  #- input_fields: [sh0, sorted_indices]
+  #- input_fields: [sh0]
   #transforms:
-  #- reindex:
-  #src_field: sh0
-  #index_field: sorted_indices
+  #- reshape:
+  #start_dim: 2
+  #shape: [3]
+
+  - input_fields: [sh0, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: sh0
+          index_field: sorted_indices
+
+  - input_fields: [opacities]
+    transforms:
+      - reshape:
+          start_dim: 2
+          shape: [1]
 
   #- input_fields: [shN, sorted_indices]
   #transforms:
   #- reindex:
   #src_field: shN
   #index_field: sorted_indices
+  # opacity-sh0 rgba
+  - input_fields: [opacities, sh0]
+    transforms:
+      - combine:
+          method: concat
+          dim: 2
+          to_field: sh0
 
-  ##opacity-sh0 rgba
-  #- input_fields: [opacities, sh0]
-  #transforms:
-  #- combine:
-  #method: concat
-  #dim: -1
-  #to_field: sh0
+  - input_fields: [sh0]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
 
-  #- input_fields: [sh0]
-  #transforms:
-  #- remapping:
-  #method: channelwise-minmax
-  #min: 0
-  #max: 255
-  #dim: 2
-  #- to_dtype:
-  #dtype: uint8
-  #round_to_int: true
   ##shN
   #- input_fields: [shN]
   #transforms:
@@ -226,7 +244,6 @@ ops:
   ## add zeros in 3rd dimension
   ## map to unit
   ##img file outputs, sogs uses lossless webp, sog uses avif
-
   - input_fields: [means_l]
     transforms:
       - write_file:
@@ -237,6 +254,7 @@ ops:
             quality: 100
             method: 6
             exact: true
+
   - input_fields: [means_u]
     transforms:
       - write_file:
@@ -248,36 +266,27 @@ ops:
             method: 6
             exact: true
 
-  #- input_fields:
-  #from_fields_with_prefix: means_bytes_
-  #transforms:
-  #- write_file:
-  #type: image
-  #image_codec: avif
-  #coding_params:
-  #quality: -1
-  #chroma: 444
-  #matrix_coefficients: 0
-  #- input_fields: [scales] #TODO: CHECK, if it is rgba
-  #transforms:
-  #- write_file:
-  #type: webp
-  #coding_params:
-  #lossless: true
-  #quality: 100
-  #method: 6
-  #exact: true
+  - input_fields: [scales]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
 
-  #- input_fields: [sh0] #TODO: CHECK, if it is rgba
-  #transforms:
-  #- write_file:
-  #type: webp
-  #coding_params:
-  #lossless: true
-  #quality: 100
-  #method: 6
-  #exact: true
-
+  - input_fields: [sh0] #TODO: CHECK, if it is rgba
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
   #- input_fields: [shN_centroids] #rgb
   #transforms:
   #- write_file:
@@ -287,7 +296,6 @@ ops:
   #quality: 100
   #method: 6
   #exact: true
-
   #- input_fields: [shN_labels] #rgb
   #transforms:
   #- write_file:
