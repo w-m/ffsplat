@@ -25,31 +25,30 @@ jobs:
       - name: Run checks
         run: make check
 
-  # TODO: re-enable tests when we have an environment that doesn't require a GPU for CI testing
-  # tests-and-type-check:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
-  #     fail-fast: false
-  #   defaults:
-  #     run:
-  #       shell: bash
-  #   steps:
-  #     - name: Check out
-  #       uses: actions/checkout@v4
+  type-check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+      fail-fast: false
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
 
-  #     - name: Set up the environment
-  #       uses: ./.github/actions/setup-python-env
-  #       with:
-  #         python-version: ${{ matrix.python-version }}
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: ${{ matrix.python-version }}
 
-  #     - name: Run tests
-  #       run: uv run python -m pytest tests
+      # TODO: re-enable tests when we have an environment that doesn't require a GPU for CI testing
+      #     - name: Run tests
+      #       run: uv run python -m pytest tests
 
-  # TODO: this is duplicated and already covered in `make check` above?
-  #     - name: Check typing
-  #       run: uv run mypy
+      - name: Check typing
+        run: uv run mypy
 
   # TODO: re-enable documentation checks when we start documentation
   # check-docs:
