@@ -2,7 +2,10 @@
 
 
 import dataclasses
+import io
+import sys
 import time
+from collections import deque
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Literal, Optional, Union
@@ -152,16 +155,12 @@ class Viewer:
             # Use a <pre> block inside a scrollable container. Keep a
             # reference so we can update it from the stdout redirector.
             self._stdout_html = self.server.gui.add_html(
-                "<pre style='white-space:pre-wrap;font-family:monospace;margin:0'></pre>"
+                "<pre style='white-space:pre-wrap;font-family:monospace;margin:0;padding:8px;'></pre>"
             )
 
         # Hook Python stdout/stderr so new prints appear in the GUI.
         # We keep the original streams so behaviour in the terminal is
         # unchanged.
-        import io
-        import sys
-        from collections import deque
-
         class _GuiStdout(io.TextIOBase):
             """Wraps an underlying stream and mirrors the last few lines to a
             viser HTML handle."""
@@ -200,7 +199,7 @@ class Viewer:
             # Internal ------------------------------------------------------
             def _refresh_html(self):
                 content = (
-                    "<pre style='white-space:pre-wrap;font-family:monospace;margin:0'>"
+                    "<pre style='white-space:pre-wrap;font-family:monospace;margin:0;padding:8px;'>"
                     + "\n".join(self._buf)
                     + "</pre>"
                 )
