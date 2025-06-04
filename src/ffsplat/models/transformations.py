@@ -485,17 +485,17 @@ class Pack(Transformation):
         decoding_update: list[dict[str, Any]] = []
 
         match params:
-            case {"multiple": multiple}:
+            case {"multiple": multiple, "length": length}:
                 # /num clusters / 3
-                multiple = params.get("mutliple", 64)
-                length = params.get("length", 1)
-                field_data = field_data.reshape((-1, int(length * multiple), 3))
+                # multiple = params.get("mutliple", 64)
+                # length = params.get("length", 1)
+                field_data = field_data.reshape((-1, int(length * multiple / 3), 3))
             case _:
                 raise ValueError(f"Unknown Pack parameters: {params}")
         decoding_update.append({
             "input_fields": [field_name],
             "transforms": [{"pack": {"multiple": multiple, "length": length}}],
-        })
+        })  # TODO: this is not correct, need to flatten
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
 
@@ -630,7 +630,7 @@ class Reindex(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
-
+        # TODO: make this compatible with single
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
@@ -662,18 +662,20 @@ class Sort(Transformation):
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
 
+        sorted_indices = None
         if field_data is None:
-            raise ValueError("Field data is None before lexicographic sorting")
+            raise ValueError("Field data is None before sorting")
         match params:
             case {"method": "lexicographic"}:
-                sorted_indices = np.lexsort(field_data.cpu().numpy())
+                sorted_indices = np.lexsort(field_data.permute(dims=(1, 0)).cpu().numpy())
+                sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
             case {"method": "argsort"}:
-                sorted_indices = torch.argsort(field_data).cpu().numpy()
+                sorted_indices = torch.argsort(field_data)
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
         # sorted_indices = sorted_indeces.reshape(params.get("shape",(64,-1)))
         # new_fields[field_name] = Field(field_data_sorted, parentOp)
-        new_fields["to_field"] = Field(sorted_indices, parentOp)
+        new_fields[params["to_field"]] = Field(sorted_indices, parentOp)
 
         # TODO: decoding update???
         return new_fields, decoding_update
