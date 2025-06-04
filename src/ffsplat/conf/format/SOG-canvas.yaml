@@ -124,13 +124,7 @@ ops:
           start_dim: 2
           shape: [1]
 
-  #- input_fields: [shN, sorted_indices]
-  #transforms:
-  #- reindex:
-  #src_field: shN
-  #index_field: sorted_indices
-  # opacity-sh0 rgba
-  - input_fields: [opacities, sh0]
+  - input_fields: [sh0, opacities] #opacity-sh0 rgba
     transforms:
       - combine:
           method: concat
