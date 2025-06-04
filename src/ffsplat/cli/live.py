@@ -229,7 +229,7 @@ class InteractiveConversionTool:
         try:
             encoder.encode(verbose=self.verbose)
         except Exception as e:
-            print(f"Exception occured: {e}")
+            print(f"Exception occurred: {e}")
             return
 
         # add scene to scene list and load it to view the scene
