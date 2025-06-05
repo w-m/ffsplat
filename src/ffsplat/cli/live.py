@@ -259,7 +259,7 @@ class InteractiveConversionTool:
         shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
 
     def _save_encoding_params(self, scene_id):
-        print(f"Saving encoding paramters from scene {scene_id}...")
+        print(f"Saving encoding parameters from scene {scene_id}...")
         params_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/encoding_params")
         if not os.path.exists(params_path):
             os.makedirs(params_path)
