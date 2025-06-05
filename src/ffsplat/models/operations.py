@@ -35,6 +35,8 @@ class Operation:
 
         if transform_type == "write_file":
             params[transform_type]["base_path"] = str(output_path)
+        elif transform_type == "read_file":
+            params[transform_type]["last_modified"] = Path(params[transform_type]["file_path"]).stat().st_mtime
 
         if isinstance(input_field_param, dict):
             prefix = input_field_param.get("from_fields_with_prefix", None)
