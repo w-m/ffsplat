@@ -25,9 +25,7 @@ ops:
       - remapping:
           method: signed-log
           to_field: means
-  #- input_fields: [quaternions]
-  #transforms:
-  #-
+
   - input_fields: [scales]
     transforms:
       - remapping:
@@ -37,6 +35,12 @@ ops:
     transforms:
       - remapping:
           method: inverse-sigmoid
+
+  - input_fields: [quaternions]
+    transforms:
+      - reparametize:
+          method: unit_sphere
+          dim: -1
 
   - input_fields: [means, sh0, shN, opacities, scales, quaternions]
     transforms:
@@ -106,11 +110,22 @@ ops:
           src_field: opacities
           index_field: sorted_indices
 
-  #- input_fields: [sh0]
-  #transforms:
-  #- reshape:
-  #start_dim: 2
-  #shape: [3]
+  - input_fields: [quaternions, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: quaternions
+          index_field: sorted_indices
+
+  - input_fields: [quaternions] #pack quaternions
+    transforms:
+      - reparametize:
+          method: pack_dynamic
+      - simple_quantize:
+          min_values: [0, 0, 0, 252]
+          max_values: [255, 255, 255, 255]
+          dim: 2
+          dtype: uint8
+          round_to_int: true
 
   - input_fields: [sh0, sorted_indices]
     transforms:
@@ -162,7 +177,7 @@ ops:
       - simple_quantize:
           min: 0
           max: 255
-          dim: 20 #dummy dim
+          dim: 2
           dtype: uint8
           round_to_int: true
 
@@ -172,28 +187,11 @@ ops:
           method: lexicographic
           to_field: shN_centroids_indices
 
-  - input_fields: [shN_centroids_indices] #for reindexing
-    transforms:
-      - reshape:
-          start_dim: 1
-          shape: [1]
-
-  - input_fields: [shN_labels] #for reindexing
-    transforms:
-      - reshape:
-          start_dim: 1
-          shape: [1]
-
   - input_fields: [shN_centroids, shN_centroids_indices]
     transforms:
       - reindex:
           src_field: shN_centroids
           index_field: shN_centroids_indices
-
-  - input_fields: [shN_centroids_indices]
-    transforms:
-      - reshape:
-          shape: [-1] #for argsort
 
   - input_fields: [shN_centroids]
     transforms:
@@ -205,12 +203,6 @@ ops:
       - sort:
           method: argsort
           to_field: shN_centroids_indices_sorted_inverse
-
-  - input_fields: [shN_centroids_indices_sorted_inverse]
-    transforms:
-      - reshape:
-          start_dim: 1
-          shape: [1] #for reindexing
 
   - input_fields: [shN_labels, shN_centroids_indices_sorted_inverse]
     transforms:
@@ -269,6 +261,17 @@ ops:
             exact: true
 
   - input_fields: [scales]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [quaternions] #rgba
     transforms:
       - write_file:
           type: image
