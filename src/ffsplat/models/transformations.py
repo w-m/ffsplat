@@ -436,16 +436,13 @@ class Reparametrize(Transformation):
 
                 max_idx = max_idx.to(small.dtype)
 
+                # TODO: this should be done as remapping
                 # scale by sqrt(2) to normalize range to [-1,1]
                 # Apply brightness increase by multiplying by sqrt(2)
-                # TODO: this needs to be done s.t. it doesn't get lost in "simple quantizaton"
                 small = small * torch.sqrt(torch.tensor(2.0, device=small.device, dtype=small.dtype))
-
                 # Ensure the brightness increase is preserved after SimpleQuantize
-                # Map from [-1,1] to [0,1] before quantization
-                # small = small * 0.5 + 0.5
-                small = small.clamp(max=1.0)
-                # max_idx = (252.0 + max_idx.to(torch.float32)) / 255.0
+                small = small * 0.5 + 0.5
+                small = torch.clamp(small * 255.0, max=255.0)
                 packed = torch.cat([small, max_idx.unsqueeze(-1)], dim=-1)
                 new_fields[field_name] = Field(packed, parentOp)
 
