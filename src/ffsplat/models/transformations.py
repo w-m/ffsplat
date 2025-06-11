@@ -470,36 +470,6 @@ class Reshape(Transformation):
         return new_fields, decoding_update
 
 
-class Pack(Transformation):
-    @staticmethod
-    @override
-    def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
-        input_fields = parentOp.input_fields
-
-        field_name = next(iter(input_fields.keys()))
-        field_data = input_fields[field_name].data
-
-        new_fields: dict[str, Field] = {}
-        decoding_update: list[dict[str, Any]] = []
-
-        match params:
-            case {"multiple": multiple, "length": length}:
-                # /num clusters / 3
-                # multiple = params.get("mutliple", 64)
-                # length = params.get("length", 1)
-                field_data = field_data.reshape((-1, int(length * multiple / 3), 3))
-            case _:
-                raise ValueError(f"Unknown Pack parameters: {params}")
-        decoding_update.append({
-            "input_fields": [field_name],
-            "transforms": [{"pack": {"multiple": multiple, "length": length}}],
-        })  # TODO: this is not correct, need to flatten
-        new_fields[field_name] = Field(field_data, parentOp)
-        return new_fields, decoding_update
-
-
 class Permute(Transformation):
     @staticmethod
     @override
@@ -630,7 +600,7 @@ class Reindex(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
-        # TODO: make this compatible with single
+        # TODO: make this compatible with 1D-tensors
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
@@ -877,10 +847,10 @@ class Combine(Transformation):
                     field_data = torch.stack(tensors, dim=dim)
                 elif method == "concat":
                     field_data = torch.cat(tensors, dim=dim)
-                elif method == "concat-zeros":
+                elif method == "stack-zeros":
                     zeros = torch.zeros(tensors[0].shape, dtype=tensors[0].dtype, device=tensors[0].device)
                     tensors.append(zeros)
-                    field_data = torch.cat(tensors, dim=dim)
+                    field_data = torch.stack(tensors, dim=dim)
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
                 new_fields[to_field_name] = Field(field_data, parentOp)
@@ -1208,7 +1178,6 @@ transformation_map = {
     "plas": PLAS,
     "lookup": Lookup,
     "combine": Combine,
-    "pack": Pack,
     "write_file": WriteFile,
     "read_file": ReadFile,
     "simple_quantize": SimpleQuantize,

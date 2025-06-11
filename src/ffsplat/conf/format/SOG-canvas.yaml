@@ -162,7 +162,7 @@ ops:
       - simple_quantize:
           min: 0
           max: 255
-          dim: 2 #dummy dim
+          dim: 20 #dummy dim
           dtype: uint8
           round_to_int: true
 
@@ -172,19 +172,17 @@ ops:
           method: lexicographic
           to_field: shN_centroids_indices
 
-  - input_fields: [shN_centroids_indices]
+  - input_fields: [shN_centroids_indices] #for reindexing
     transforms:
       - reshape:
           start_dim: 1
           shape: [1]
-      #- permute:
-      #dims: [1, 0] #TODO: make this sequence simple
-      #- reshape:
-      #shape: [64, -1]
-      #- permute:
-      #dims: [1, 0]
-      #- reshape:
-      #shape: [-1]
+
+  - input_fields: [shN_labels] #for reindexing
+    transforms:
+      - reshape:
+          start_dim: 1
+          shape: [1]
 
   - input_fields: [shN_centroids, shN_centroids_indices]
     transforms:
@@ -192,49 +190,62 @@ ops:
           src_field: shN_centroids
           index_field: shN_centroids_indices
 
-  #- input_fields: [shN_centroids]
-  #transforms:
-  #- pack:
-  #multiple: 64
-  #length: 15 #should be dynamic based number of spherical harmonics ShN parameters?
-  #to_field: shN_centroids
+  - input_fields: [shN_centroids_indices]
+    transforms:
+      - reshape:
+          shape: [-1] #for argsort
 
-  #- input_fields: [shN_centroids_indices]
-  #transforms:
-  #- sort:
-  #method: argsort
-  #to_field: shN_centroids_indices_sorted_inverse
+  - input_fields: [shN_centroids]
+    transforms:
+      - reshape:
+          shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3 =
 
-  #- input_fields: [shN_labels, shN_centroids_indices_sorted_inverse]
-  #transforms:
-  #- reindex:
-  #src_field: shN_labels
-  #index_field: shN_centroids_indices_sorted_inverse
+  - input_fields: [shN_centroids_indices]
+    transforms:
+      - sort:
+          method: argsort
+          to_field: shN_centroids_indices_sorted_inverse
 
-  #- input_fields: [shN_labels]
-  #transfroms:
-  #- remapping:
-  ##reindex (inverse)
-  #to_dtype:
-  #dtype: uint16
-  #round_to_int: False
-  #reshape:
-  #to_shape: [n_sidelen, n_sidelen]
-  #split_bytes:
-  #to_fields_with_prefix: shN_labels_
-  #num_bytes: 2
-  #- input_fields: [shN_labels_0, shN_labels_1]
-  #transforms:
-  #- combine:
-  #method: concat-zeros
-  #dim: 2
-  #to_field: shN_labels
-  #- to_dtype:
-  #dtype: uint8
-  #round_to_int: true
-  ## add zeros in 3rd dimension
-  ## map to unit
-  ##img file outputs, sogs uses lossless webp, sog uses avif
+  - input_fields: [shN_centroids_indices_sorted_inverse]
+    transforms:
+      - reshape:
+          start_dim: 1
+          shape: [1] #for reindexing
+
+  - input_fields: [shN_labels, shN_centroids_indices_sorted_inverse]
+    transforms:
+      - reindex:
+          src_field: shN_centroids_indices_sorted_inverse
+          index_field: shN_labels
+
+  #bug here:
+  - input_fields: [shN_centroids_indices_sorted_inverse]
+    transforms:
+      - to_field:
+          to_field_name: shN_labels
+
+  - input_fields: [shN_labels]
+    transforms:
+      - reshape:
+          shape: [588, 588] #n_sidelen
+      - simple_quantize:
+          min: 0
+          max: 65535
+          dim: 2
+          dtype: uint16
+          round_to_int: False
+      - split_bytes:
+          to_fields_with_prefix: shN_labels_
+          num_bytes: 2
+
+  - input_fields: [shN_labels_0, shN_labels_1]
+    transforms:
+      - combine:
+          method: stack-zeros
+          dim: 2
+          to_field: shN_labels
+
+  #img file outputs
   - input_fields: [means_l]
     transforms:
       - write_file:
@@ -268,7 +279,7 @@ ops:
             method: 6
             exact: true
 
-  - input_fields: [sh0] #TODO: CHECK, if it is rgba
+  - input_fields: [sh0] #rgba
     transforms:
       - write_file:
           type: image
@@ -278,25 +289,29 @@ ops:
             quality: 100
             method: 6
             exact: true
-  #- input_fields: [shN_centroids] #rgb
-  #transforms:
-  #- write_file:
-  #type: webp
-  #coding_params:
-  #lossless: true
-  #quality: 100
-  #method: 6
-  #exact: true
-  #- input_fields: [shN_labels] #rgb
-  #transforms:
-  #- write_file:
-  #type: webp
-  #coding_params:
-  #lossless: true
-  #quality: 100
-  #method: 6
-  #exact: true
-#Done: means,scales, opacities, sh0, shN, lexsort, argsort, output webp
+
+  - input_fields: [shN_centroids] #rgb
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [shN_labels] #rgb , result is suprisingly less noisy than in sogs
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+#Done: means,scales, opacities, sh0, shN, lexsort, argsort, output webp,
 #TODO: dynamic number of clusters
 #TODO: quaternions
 # check reshaping and transposes
