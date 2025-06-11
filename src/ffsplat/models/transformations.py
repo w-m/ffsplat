@@ -382,6 +382,79 @@ class Remapping(Transformation):
         return dynamic_params_config
 
 
+class Reparametrize(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        match params:
+            case {"method": "unit_sphere", "dim": dim}:
+                field_data = field_data / torch.linalg.norm(field_data, dim=dim, keepdim=True)
+
+                sign_mask = field_data.select(dim, 3) < 0
+                # sign_mask = field_data.select(dim, 0) < 0
+                field_data[sign_mask] *= -1
+                new_fields[field_name] = Field(field_data, parentOp)
+
+                # field_data = field_data.narrow(dim, 0, field_data.shape[dim] - 1)
+                # field_data = field_data.narrow(dim, 1,field_data.shape[dim] - 1)
+                # decoding_update.append({
+                # "unit_sphere_recover_last": {
+                # "dim": dim,
+                # }
+                # })
+            case {"method": "pack_dynamic"}:
+                abs_field_data = field_data.abs()
+                max_idx = abs_field_data.argmax(dim=-1)
+
+                # ensure largest component is positive
+                max_vals = field_data.gather(-1, max_idx.unsqueeze(-1)).squeeze(-1)
+                sign = max_vals.sign()
+                sign[sign == 0] = 1
+                q_signed = field_data * sign.unsqueeze(-1)
+
+                # build variants dropping each component
+                variants = []
+                for i in range(4):
+                    dims = list(range(4))
+                    dims.remove(i)
+                    variants.append(q_signed[..., dims])  # (...,3)
+                stacked = torch.stack(variants, dim=-2)  # (...,4,3)
+
+                # select the appropriate 3-vector based on max_idx
+                idx_exp = max_idx.unsqueeze(-1).unsqueeze(-1).expand(*max_idx.shape, 1, 3)
+                small = torch.gather(stacked, dim=-2, index=idx_exp).squeeze(-2)  # (...,3)
+
+                max_idx = max_idx.to(small.dtype)
+
+                # scale by sqrt(2) to normalize range to [-1,1]
+                # Apply brightness increase by multiplying by sqrt(2)
+                # TODO: this needs to be done s.t. it doesn't get lost in "simple quantizaton"
+                small = small * torch.sqrt(torch.tensor(2.0, device=small.device, dtype=small.dtype))
+
+                # Ensure the brightness increase is preserved after SimpleQuantize
+                # Map from [-1,1] to [0,1] before quantization
+                # small = small * 0.5 + 0.5
+                small = small.clamp(max=1.0)
+                # max_idx = (252.0 + max_idx.to(torch.float32)) / 255.0
+                packed = torch.cat([small, max_idx.unsqueeze(-1)], dim=-1)
+                new_fields[field_name] = Field(packed, parentOp)
+
+            case _:
+                raise ValueError(f"Unknown ToField parameters: {params}")
+
+        return new_fields, decoding_update
+
+
 class ToField(Transformation):
     @staticmethod
     @override
@@ -604,8 +677,8 @@ class Reindex(Transformation):
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
-                if len(index_field_obj.data.shape) != 2:
-                    raise ValueError("Expecting grid for re-index operation")
+                # if len(index_field_obj.data.shape) != 2:
+                # raise ValueError("Expecting grid for re-index operation")
                 decoding_update.append({
                     "input_fields": [src_field_name],
                     "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
@@ -1107,11 +1180,10 @@ class SimpleQuantize(Transformation):
                 "max_values": max_values,
                 "dim": dim,
                 "dtype": dtype_str,
+                "round_to_int": round_to_int,
             }:
                 if field_data is None:
                     raise ValueError("Field data is None before channelwise remapping")
-
-                field_data = convert_to_dtype(field_data, dtype_str)
 
                 min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
                 max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
@@ -1128,6 +1200,11 @@ class SimpleQuantize(Transformation):
 
                 field_data = minmax(field_data)
                 field_data = field_data * field_range + min_tensor
+
+                if round_to_int:
+                    field_data = torch.round(field_data)
+                field_data = convert_to_dtype(field_data, dtype_str)
+
             case _:
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
@@ -1169,6 +1246,7 @@ transformation_map = {
     "flatten": Flatten,
     "reshape": Reshape,
     "remapping": Remapping,
+    "reparametize": Reparametrize,
     "to_field": ToField,
     "permute": Permute,
     "to_dtype": ToDType,
