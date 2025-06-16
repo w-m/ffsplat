@@ -120,6 +120,34 @@ ops:
     transforms:
       - reparametize:
           method: pack_dynamic
+          to_fields_with_prefix: quaternions_packed_
+
+  - input_fields: [quaternions_packed_values]
+    transforms:
+      - multiply_add:
+          multiply: sqrt2
+          add: 0
+          clamp: false
+      - multiply_add:
+          multiply: 0.5
+          add: 0.5
+          clamp: false
+      - multiply_add: # could be clipped to 0,1 here, quantization minmax to 0-255 range, but sogs clips after * 255
+          multiply: 255
+          add: 0
+          clamp: true
+          min: 0
+          max: 255
+
+  - input_fields: [quaternions_packed_values, quaternions_packed_indices]
+    transforms:
+      - combine:
+          method: concat
+          dim: 2
+          to_field: quaternions
+
+  - input_fields: [quaternions]
+    transforms:
       - simple_quantize:
           min_values: [0, 0, 0, 252]
           max_values: [255, 255, 255, 255]
@@ -168,7 +196,7 @@ ops:
           shape: [-1, 45] # 3*15 spherical harmonics
       - cluster:
           method: kmeans
-          num_clusters: 65536 #TODO: is dynamic in sogs
+          num_clusters: 65536 #is dynamic in sogs
           distance: manhattan
           to_fields_with_prefix: shN_
 
@@ -196,7 +224,7 @@ ops:
   - input_fields: [shN_centroids]
     transforms:
       - reshape:
-          shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3 =
+          shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3) =
 
   - input_fields: [shN_centroids_indices]
     transforms:
@@ -314,8 +342,4 @@ ops:
             quality: 100
             method: 6
             exact: true
-#Done: means,scales, opacities, sh0, shN, lexsort, argsort, output webp,
-#TODO: dynamic number of clusters
-#TODO: quaternions
-# check reshaping and transposes
-# TODO: side_len grid reshaping?-> doen by sorting topk already?, meta-data sogs, meta-data ffsplat
+#TODO: decoding, output of metadata

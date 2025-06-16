@@ -382,6 +382,38 @@ class Remapping(Transformation):
         return dynamic_params_config
 
 
+class MultiplyAdd(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        match params:
+            case {"multiply": mul, "add": add, "clamp": clamp_}:
+                if mul == "sqrt2":
+                    mul = torch.sqrt(torch.tensor(2.0, device=field_data.device, dtype=field_data.dtype))
+                field_data = field_data * mul + add
+                if clamp_:
+                    match params:
+                        case {"min": min_, "max": max_}:
+                            field_data = field_data.clamp(min=min_, max=max_)
+                        case _:
+                            raise ValueError("Clamp parameters must contain 'min' and 'max' values")
+            case _:
+                raise ValueError(f"Unknown MulAdd parameters: {params}")
+
+        new_fields[field_name] = Field(field_data, parentOp)
+        return new_fields, decoding_update
+
+
 class Reparametrize(Transformation):
     @staticmethod
     @override
@@ -412,7 +444,7 @@ class Reparametrize(Transformation):
                 # "dim": dim,
                 # }
                 # })
-            case {"method": "pack_dynamic"}:
+            case {"method": "pack_dynamic", "to_fields_with_prefix": to_fields_with_prefix}:
                 abs_field_data = field_data.abs()
                 max_idx = abs_field_data.argmax(dim=-1)
 
@@ -432,19 +464,13 @@ class Reparametrize(Transformation):
 
                 # select the appropriate 3-vector based on max_idx
                 idx_exp = max_idx.unsqueeze(-1).unsqueeze(-1).expand(*max_idx.shape, 1, 3)
-                small = torch.gather(stacked, dim=-2, index=idx_exp).squeeze(-2)  # (...,3)
+                values = torch.gather(stacked, dim=-2, index=idx_exp).squeeze(-2)  # (...,3)
 
-                max_idx = max_idx.to(small.dtype)
+                max_idx = max_idx.to(values.dtype).unsqueeze(-1)
 
-                # TODO: this should be done as remapping
-                # scale by sqrt(2) to normalize range to [-1,1]
                 # Apply brightness increase by multiplying by sqrt(2)
-                small = small * torch.sqrt(torch.tensor(2.0, device=small.device, dtype=small.dtype))
-                # Ensure the brightness increase is preserved after SimpleQuantize
-                small = small * 0.5 + 0.5
-                small = torch.clamp(small * 255.0, max=255.0)
-                packed = torch.cat([small, max_idx.unsqueeze(-1)], dim=-1)
-                new_fields[field_name] = Field(packed, parentOp)
+                new_fields[f"{to_fields_with_prefix}indices"] = Field(max_idx, parentOp)
+                new_fields[f"{to_fields_with_prefix}values"] = Field(values, parentOp)
 
             case _:
                 raise ValueError(f"Unknown ToField parameters: {params}")
@@ -1243,6 +1269,7 @@ transformation_map = {
     "flatten": Flatten,
     "reshape": Reshape,
     "remapping": Remapping,
+    "multiply_add": MultiplyAdd,
     "reparametize": Reparametrize,
     "to_field": ToField,
     "permute": Permute,
