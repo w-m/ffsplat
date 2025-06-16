@@ -514,16 +514,9 @@ class Reparametrize(Transformation):
                 field_data[sign_mask] *= -1
                 new_fields[field_name] = Field(field_data, parentOp)
 
-                # field_data = field_data.narrow(dim, 0, field_data.shape[dim] - 1)
-                # field_data = field_data.narrow(dim, 1,field_data.shape[dim] - 1)
-                # decoding_update.append({
-                # "unit_sphere_recover_last": {
-                # "dim": dim,
-                # }
-                # })
-            case {"method": "pack_dynamic", "to_fields_with_prefix": to_fields_with_prefix}:
+            case {"method": "pack_dynamic", "to_fields_with_prefix": to_fields_with_prefix, "dim": dim}:
                 abs_field_data = field_data.abs()
-                max_idx = abs_field_data.argmax(dim=-1)
+                max_idx = abs_field_data.argmax(dim=dim)
 
                 # ensure largest component is positive
                 max_vals = field_data.gather(-1, max_idx.unsqueeze(-1)).squeeze(-1)
@@ -548,6 +541,69 @@ class Reparametrize(Transformation):
                 # Apply brightness increase by multiplying by sqrt(2)
                 new_fields[f"{to_fields_with_prefix}indices"] = Field(max_idx, parentOp)
                 new_fields[f"{to_fields_with_prefix}values"] = Field(values, parentOp)
+                decoding_update.append({
+                    "input_fields": [f"{to_fields_with_prefix}indices", f"{to_fields_with_prefix}values"],
+                    "transforms": [
+                        {
+                            "reparametize": {
+                                "method": "unpack_dynamic",
+                                "from_fields_with_prefix": to_fields_with_prefix,
+                                "dim": -1,
+                                "to_field_name": field_name,
+                            }
+                        }
+                    ],
+                })
+
+            case {
+                "method": "unpack_dynamic",
+                "from_fields_with_prefix": from_fields_with_prefix,
+                "dim": dim,
+                "to_field_name": to_field_name,
+            }:
+                # Retrieve the indices and values fields
+                indices_field = input_fields[f"{from_fields_with_prefix}indices"].data
+                values_field = input_fields[f"{from_fields_with_prefix}values"].data
+
+                if values_field is None:
+                    raise ValueError("values field data is None before unit sphere recovery")
+                if values_field.shape[dim] != 3:
+                    raise ValueError(f"Field data shape mismatch for unit sphere recovery: {field_data.shape}")
+
+                # Ensure indices are integers
+                indices_field = indices_field.to(torch.int64).squeeze(-1)
+
+                # Compute squared norm of the partial vector
+                partial_norm_sq = (values_field**2).sum(dim=dim, keepdim=True)
+
+                # Recover the missing component (always non-negative)
+                w = torch.sqrt(torch.clamp(1.0 - partial_norm_sq, min=0.0))
+
+                # Create a tensor to hold the reconstructed data
+                num_components = values_field.shape[-1] + 1  # Original data had one more component
+                reconstructed = torch.zeros(
+                    *values_field.shape[:-1], num_components, dtype=values_field.dtype, device=values_field.device
+                )
+
+                # Scatter the values back into the reconstructed tensor
+                reconstructed.scatter_(-1, indices_field.unsqueeze(-1), src=w)
+
+                # Dynamically place values_field into the indices not covered by indices_field
+                full_indices = torch.arange(num_components, device=values_field.device).view(1, -1)
+
+                indices_field_exp = indices_field.unsqueeze(-1)
+
+                # correct positions of values
+                value_mask = (full_indices != indices_field_exp).to(values_field.dtype)
+
+                # Set values_field into the masked slots
+                value_positions = value_mask.bool()
+                reconstructed[value_positions] = values_field.flatten()
+
+                # Optional re-normalization to mitigate numerical drift
+                field_data = reconstructed / torch.linalg.norm(reconstructed, dim=dim, keepdim=True)
+
+                new_fields[to_field_name] = Field(field_data, parentOp)
 
             case _:
                 raise ValueError(f"Unknown ToField parameters: {params}")
