@@ -382,7 +382,7 @@ class Remapping(Transformation):
         return dynamic_params_config
 
 
-class MultiplyAdd(Transformation):
+class Linear(Transformation):
     @staticmethod
     @override
     def apply(
@@ -397,18 +397,95 @@ class MultiplyAdd(Transformation):
         decoding_update: list[dict[str, Any]] = []
 
         match params:
-            case {"multiply": mul, "add": add, "clamp": clamp_}:
-                if mul == "sqrt2":
-                    mul = torch.sqrt(torch.tensor(2.0, device=field_data.device, dtype=field_data.dtype))
-                field_data = field_data * mul + add
-                if clamp_:
-                    match params:
-                        case {"min": min_, "max": max_}:
-                            field_data = field_data.clamp(min=min_, max=max_)
-                        case _:
-                            raise ValueError("Clamp parameters must contain 'min' and 'max' values")
+            case {"method": "multiply-add", "multiply": multiply_, "add": add_}:
+                if multiply_ == "sqrt2":
+                    multiply_ = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
+                    # add = torch.tensor([add],dtype=field_data.dtype,device=field_data.device)
+                field_data = field_data * multiply_ + add_
+                multiply_ = multiply_.item() if isinstance(multiply_, Tensor) else multiply_
+                # add = add.item() if isinstance(add, Tensor) else add
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "linear": {
+                                "method": "add-multiply",
+                                "add": -add_,
+                                "multiply": 1.0 / multiply_ if multiply_ != 0 else 0,
+                            }
+                        }
+                    ],
+                })
+            case {"method": "add-multiply", "add": add_, "multiply": multiply_}:
+                if multiply_ == "sqrt2":
+                    multiply_ = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
+                field_data = (field_data + add_) * multiply_
+                multiply_ = multiply_.item() if isinstance(multiply_, Tensor) else multiply_
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "linear": {
+                                "method": "multiply-add",
+                                "multiply": 1.0 / multiply_ if multiply_ != 0 else 0,
+                                "add": -add_,
+                            }
+                        }
+                    ],
+                })
+            case {"method": "add", "value": value}:
+                field_data = field_data + value
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "linear": {
+                                "method": "add",
+                                "value": -value,
+                            }
+                        }
+                    ],
+                })
+            case {"method": "multiply", "value": value}:
+                if value == "sqrt2":
+                    value = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
+                field_data = field_data * value
+                value = value.item() if isinstance(value, Tensor) else value
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "linear": {
+                                "method": "multiply",
+                                "value": 1.0 / value if value != 0 else 0,
+                            }
+                        }
+                    ],
+                })
+
+        new_fields[field_name] = Field(field_data, parentOp)
+        return new_fields, decoding_update
+
+
+class Clamp(Transformation):  # this is lossy, decoding can't recover values outside the range
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        match params:
+            case {"min": min_val, "max": max_val}:
+                field_data = field_data.clamp(min=min_val, max=max_val)
             case _:
-                raise ValueError(f"Unknown MulAdd parameters: {params}")
+                raise ValueError(f"Unknown Clamp parameters: {params}")
 
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
@@ -1269,7 +1346,8 @@ transformation_map = {
     "flatten": Flatten,
     "reshape": Reshape,
     "remapping": Remapping,
-    "multiply_add": MultiplyAdd,
+    "linear": Linear,
+    "clamp": Clamp,
     "reparametize": Reparametrize,
     "to_field": ToField,
     "permute": Permute,
