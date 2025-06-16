@@ -124,18 +124,17 @@ ops:
 
   - input_fields: [quaternions_packed_values]
     transforms:
-      - multiply_add:
-          multiply: sqrt2
-          add: 0
-          clamp: false
-      - multiply_add:
+      - linear:
+          method: multiply
+          value: sqrt2
+      - linear:
+          method: multiply-add
           multiply: 0.5
           add: 0.5
-          clamp: false
-      - multiply_add: # could be clipped to 0,1 here, quantization minmax to 0-255 range, but sogs clips after * 255
-          multiply: 255
-          add: 0
-          clamp: true
+      - linear:
+          method: multiply
+          value: 255
+      - clamp:
           min: 0
           max: 255
 
