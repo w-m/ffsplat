@@ -121,20 +121,22 @@ ops:
       - reparametize:
           method: pack_dynamic
           to_fields_with_prefix: quaternions_packed_
+          dim: -1
+
+  #- input_fields: [quaternions_packed_values,quaternions_packed_indices]
+  #transforms:
+  #- reparametize:
+  #method: unpack_dynamic
+  #dim: 2
+  #from_fields_with_prefix: quaternions_packed_
+  #to_field_name: quaternions_new
 
   - input_fields: [quaternions_packed_values]
     transforms:
-      - linear:
-          method: multiply
-          value: sqrt2
-      - linear:
-          method: multiply-add
-          multiply: 0.5
-          add: 0.5
-      - linear:
-          method: multiply
-          value: 255
-      - clamp:
+      - remapping:
+          method: scale-sqrt2
+      - remapping:
+          method: "minmax"
           min: 0
           max: 255
 
