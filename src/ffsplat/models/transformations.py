@@ -220,7 +220,9 @@ class Split(Transformation):
                 "to_field_list": to_field_list,
             }:
                 chunks = field_data.split(split_size_or_sections, dim)
-                for target_field_name, chunk in zip(to_field_list, chunks, strict=False):
+                for target_field_name, chunk in zip(to_field_list, chunks):
+                    if target_field_name == "_":
+                        continue
                     if squeeze:
                         chunk = chunk.squeeze(dim)
                     new_fields[target_field_name] = Field(chunk, parentOp)
@@ -280,6 +282,20 @@ class Remapping(Transformation):
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
         match params:
+            case {"method": "scale-sqrt2"}:
+                scale = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
+                field_data = field_data * scale
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"remapping": {"method": "scale-inverse-sqrt2"}}],
+                })
+            case {"method": "scale-inverse-sqrt2"}:
+                scale = 1.0 / torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
+                field_data = field_data * scale
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"remapping": {"method": "scale-sqrt2"}}],
+                })
             case {"method": "exp"}:
                 field_data = torch.exp(field_data)
             case {"method": "sigmoid"}:
@@ -364,6 +380,9 @@ class Remapping(Transformation):
                 normalized = normalized * (max_val_f - min_val_f) + min_val_f
 
                 field_data = normalized
+
+            case {"method": "canvas", "min": min_val, "max": max_val}:
+                field_data = field_data.clamp(min=min_val, max=max_val)
             case _:
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
@@ -380,115 +399,6 @@ class Remapping(Transformation):
             "values": ["log", "signed-log", "inverse-sigmoid"],
         })
         return dynamic_params_config
-
-
-class Linear(Transformation):
-    @staticmethod
-    @override
-    def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
-        input_fields = parentOp.input_fields
-
-        field_name = next(iter(input_fields.keys()))
-        field_data = input_fields[field_name].data
-
-        new_fields: dict[str, Field] = {}
-        decoding_update: list[dict[str, Any]] = []
-
-        match params:
-            case {"method": "multiply-add", "multiply": multiply_, "add": add_}:
-                if multiply_ == "sqrt2":
-                    multiply_ = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
-                    # add = torch.tensor([add],dtype=field_data.dtype,device=field_data.device)
-                field_data = field_data * multiply_ + add_
-                multiply_ = multiply_.item() if isinstance(multiply_, Tensor) else multiply_
-                # add = add.item() if isinstance(add, Tensor) else add
-                decoding_update.append({
-                    "input_fields": [field_name],
-                    "transforms": [
-                        {
-                            "linear": {
-                                "method": "add-multiply",
-                                "add": -add_,
-                                "multiply": 1.0 / multiply_ if multiply_ != 0 else 0,
-                            }
-                        }
-                    ],
-                })
-            case {"method": "add-multiply", "add": add_, "multiply": multiply_}:
-                if multiply_ == "sqrt2":
-                    multiply_ = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
-                field_data = (field_data + add_) * multiply_
-                multiply_ = multiply_.item() if isinstance(multiply_, Tensor) else multiply_
-                decoding_update.append({
-                    "input_fields": [field_name],
-                    "transforms": [
-                        {
-                            "linear": {
-                                "method": "multiply-add",
-                                "multiply": 1.0 / multiply_ if multiply_ != 0 else 0,
-                                "add": -add_,
-                            }
-                        }
-                    ],
-                })
-            case {"method": "add", "value": value}:
-                field_data = field_data + value
-                decoding_update.append({
-                    "input_fields": [field_name],
-                    "transforms": [
-                        {
-                            "linear": {
-                                "method": "add",
-                                "value": -value,
-                            }
-                        }
-                    ],
-                })
-            case {"method": "multiply", "value": value}:
-                if value == "sqrt2":
-                    value = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
-                field_data = field_data * value
-                value = value.item() if isinstance(value, Tensor) else value
-                decoding_update.append({
-                    "input_fields": [field_name],
-                    "transforms": [
-                        {
-                            "linear": {
-                                "method": "multiply",
-                                "value": 1.0 / value if value != 0 else 0,
-                            }
-                        }
-                    ],
-                })
-
-        new_fields[field_name] = Field(field_data, parentOp)
-        return new_fields, decoding_update
-
-
-class Clamp(Transformation):  # this is lossy, decoding can't recover values outside the range
-    @staticmethod
-    @override
-    def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
-        input_fields = parentOp.input_fields
-
-        field_name = next(iter(input_fields.keys()))
-        field_data = input_fields[field_name].data
-
-        new_fields: dict[str, Field] = {}
-        decoding_update: list[dict[str, Any]] = []
-
-        match params:
-            case {"min": min_val, "max": max_val}:
-                field_data = field_data.clamp(min=min_val, max=max_val)
-            case _:
-                raise ValueError(f"Unknown Clamp parameters: {params}")
-
-        new_fields[field_name] = Field(field_data, parentOp)
-        return new_fields, decoding_update
 
 
 class Reparametrize(Transformation):
@@ -1045,6 +955,7 @@ class Combine(Transformation):
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
         field_data: Tensor = torch.empty(0)
+        decoding_update: list[dict[str, Any]] = []
 
         match params:
             case {"method": "bytes", "to_field": to_field_name}:
@@ -1080,13 +991,28 @@ class Combine(Transformation):
                     zeros = torch.zeros(tensors[0].shape, dtype=tensors[0].dtype, device=tensors[0].device)
                     tensors.append(zeros)
                     field_data = torch.stack(tensors, dim=dim)
+                    decoding_update.append({
+                        "input_fields": [to_field_name],
+                        "transforms": [
+                            {
+                                "split": {
+                                    "split_size_or_sections": [
+                                        t.shape[dim] if dim < len(t.shape) else 1 for t in tensors
+                                    ]
+                                    + [1],
+                                    "dim": dim,
+                                    "to_field_list": [*list(parentOp.input_fields), "_"],
+                                }
+                            }
+                        ],
+                    })
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
                 new_fields[to_field_name] = Field(field_data, parentOp)
             case _:
                 raise ValueError(f"Unknown Combine parameters: {params}")
 
-        return new_fields, []
+        return new_fields, decoding_update
 
 
 class Lookup(Transformation):
@@ -1402,8 +1328,6 @@ transformation_map = {
     "flatten": Flatten,
     "reshape": Reshape,
     "remapping": Remapping,
-    "linear": Linear,
-    "clamp": Clamp,
     "reparametize": Reparametrize,
     "to_field": ToField,
     "permute": Permute,

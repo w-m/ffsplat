@@ -158,6 +158,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"src/ffsplat/models/transformations.py"=["C901"]
 
 [tool.ruff.format]
 preview = true
