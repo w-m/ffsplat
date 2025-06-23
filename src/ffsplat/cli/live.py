@@ -65,11 +65,9 @@ class SceneData:
     # gaussians: Tensor
 
 
-class ProcessingQueue:
-    pass
-
-
 class InteractiveConversionViewer(Viewer):
+    """This class is an extension of the nerfview viewer for the InteractiveConversionTool."""
+
     def __init__(
         self,
         server: viser.ViserServer,
@@ -175,12 +173,14 @@ class InteractiveConversionViewer(Viewer):
             self.eval_progress.visible = False
             self.eval_table = self.server.gui.add_html("")
 
-    def add_convert(self, reset_dynamic_params_gui_fn: Callable, convert_fn: Callable, live_preview_fn: Callable):
+    def add_convert(
+        self, reset_dynamic_params_gui_fn: Callable, convert_button_fn: Callable, live_preview_fn: Callable
+    ):
         with self.tab_group.add_tab("Convert") as self.convert_tab:
             self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
             self._output_dropdown.on_update(reset_dynamic_params_gui_fn)
             self._convert_button = self.server.gui.add_button("Convert")
-            self._convert_button.on_click(convert_fn)
+            self._convert_button.on_click(convert_button_fn)
             self._live_preview_checkbox = self.server.gui.add_checkbox("live preview", False)
             self._live_preview_checkbox.on_update(live_preview_fn)
         reset_dynamic_params_gui_fn(None)
@@ -189,7 +189,7 @@ class InteractiveConversionViewer(Viewer):
         self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable, save_params_fn: Callable
     ):
         with self.scenes_tab, self.server.gui.add_folder(f"Scene {scene_id}") as self.last_scene_folder:
-            self.server.gui.add_markdown(description)
+            self.last_scene_description = self.server.gui.add_markdown(description)
             load_button = self.server.gui.add_button("Load scene")
             load_button.on_click(lambda _: load_fn(scene_id))
             save_button = self.server.gui.add_button("Save scene")
@@ -206,8 +206,13 @@ class InteractiveConversionViewer(Viewer):
             self._test_button.on_click(self.rerender)
 
 
-# This class defines the functionality of the viewer that goes beyond the rendering
 class InteractiveConversionTool:
+    """This class manages the data needed for the interactive tool.
+    It defines the functionality of GUI elements of the InteractiveConversionViewer and manages
+    the interactions between the Runner and the InteractiveConversionViewer.
+    Dynamically build GUI elements are also added by this class.
+    """
+
     table_base = """
 <div style="overflow-x:auto;display: flex; justify-content: center;">
   <style>
@@ -253,27 +258,35 @@ class InteractiveConversionTool:
     temp_dir = tempfile.TemporaryDirectory()
     encoding_params: EncodingParams | None = None
 
+    enable_scene_loading: bool = True
+
+    live_preview_active: bool = False
+
     def __init__(
         self, input_path: Path, input_format: str, dataset_path: Path, results_path: Path, verbose: bool = False
     ):
-        self.scenes: list[SceneData] = []
         self.dataset: Path = dataset_path
-        self.current_scene = 0
         self.verbose = verbose
-        self.enable_scene_loading: bool = True
-        self.preview_in_scenes = False
+        self.scenes: list[SceneData] = []
 
+        # Load gaussians
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
         self.input_gaussians = self.input_gaussians.to("cuda")
 
+        # set the current gaussians to the input gaussians
+        self.current_scene = 0
         self.gaussians = self.input_gaussians
 
+        self.runner: Runner = Runner(self)
+
+        # start viewer
         self.server = viser.ViserServer(verbose=False)
         self.viewer = InteractiveConversionViewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
 
+        # adds scenes tab to viewer
         self.viewer.add_scenes(results_path)
-        self.lock_scenes = threading.Lock()
 
+        # add evaluation tab to viewer
         if dataset_path is not None:
             colmap_path = os.path.join(dataset_path, "sparse/0/")
             if not os.path.exists(colmap_path):
@@ -288,13 +301,11 @@ class InteractiveConversionTool:
             self.dataset = Dataset(dataparser)
             self.viewer.add_eval(self.full_evaluation)
 
-        self.viewer.add_convert(self.reset_dynamic_params_gui, self.conversion_wrapper, self.live_preview_callback)
+        # add convert tab to viewer
+        self.viewer.add_convert(self.reset_dynamic_params_gui, self.convert_button_callback, self.live_preview_callback)
 
-        self._add_scene("input", input_path, input_format, None)
-
-        self.conversion_queue: list[EncodingParams] = []
-        self.conversion_running: bool = False
-        self.lock_queue = threading.Lock()
+        # input gaussians are added to the scenes
+        self.add_scene("input", input_path, input_format, None)
 
         # self.viewer.add_test_functionality(self.change_scene)
 
@@ -304,98 +315,7 @@ class InteractiveConversionTool:
         self.scenes.pop()
         self.update_eval_table()
 
-    def conversion_wrapper(self, _, from_update: bool = False):
-        with self.lock_scenes:
-            if not from_update and self.viewer._live_preview_checkbox.value:
-                if self.preview_in_scenes:
-                    self.remove_last_scene()
-                output_format = self.viewer._output_dropdown.value
-                output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
-                preview_path = Path(self.temp_dir.name + "/livepreview")
-                if not os.path.exists(output_path):
-                    os.makedirs(output_path)
-                shutil.copytree(preview_path, output_path, dirs_exist_ok=True)
-                self._add_scene(
-                    self._build_description(self.encoding_params, output_format),
-                    output_path,
-                    "smurfx",
-                    copy.deepcopy(self.encoding_params),
-                )
-                self._add_scene("Live preview from conversion", preview_path, "smurfx", self.encoding_params)
-                return
-            if from_update and not self.viewer._live_preview_checkbox.value:
-                return
-
-            with self.lock_queue:
-                self.conversion_queue.append(copy.deepcopy(self.encoding_params))
-                self.viewer.eval_button.disabled = True
-
-                # we only want to work on one conversion simultaneously
-                if self.conversion_running:
-                    return
-                else:
-                    self.conversion_running = True
-                    self.viewer._live_preview_checkbox.disabled = True
-                    self.viewer._convert_button.disabled = True
-
-            while True:
-                with self.lock_queue:
-                    if not self.conversion_queue:
-                        self.viewer._convert_button.disabled = False
-                        self.viewer._live_preview_checkbox.disabled = False
-                        self.viewer.eval_button.disabled = False
-                        self.conversion_running = False
-                        break
-                    encoding_params = self.conversion_queue.pop()
-                    self.conversion_queue.clear()
-                self.viewer.scene_label.content = "Running conversion for live preview..."
-                self.convert(encoding_params)
-                self.viewer.scene_label.content = "Showing live preview"
-
-    def convert(self, encoding_params: EncodingParams):
-        print("Converting scene...")
-        output_path = Path(self.temp_dir.name + f"/gaussians{len(self.scenes)}")
-        if self.viewer._live_preview_checkbox.value:
-            # clear previous live preview
-            output_path = Path(self.temp_dir.name + "/livepreview")
-            if output_path.exists() and output_path.is_dir():
-                shutil.rmtree(output_path)
-            if self.preview_in_scenes:
-                self.remove_last_scene()
-            else:
-                self.preview_in_scenes = True
-
-        encoder = SceneEncoder(
-            encoding_params=encoding_params,
-            output_path=output_path,
-            fields=self.input_gaussians.to_field_dict(),
-            decoding_params=DecodingParams(
-                container_identifier="smurfx",
-                container_version="0.1",
-                packer="ffsplat-v0.1",
-                profile=encoding_params.profile,
-                profile_version=encoding_params.profile_version,
-                scene=encoding_params.scene,
-            ),
-        )
-        try:
-            encoder.encode(verbose=self.verbose)
-        except Exception as e:
-            print(f"Exception occurred: {e}")
-            return
-
-        # add scene to scene list and load it to view the scene
-
-        if not self.viewer._live_preview_checkbox.value:
-            output_format = self.viewer._output_dropdown.value
-            self._add_scene(
-                self._build_description(encoding_params, output_format), output_path, "smurfx", encoding_params
-            )
-        else:
-            self._add_scene("Live preview from conversion", output_path, "smurfx", encoding_params)
-        self.viewer.rerender(None)
-
-    def _add_scene(self, description, data_path, input_format, encoding_params):
+    def add_scene(self, description, data_path, input_format, encoding_params):
         self.scenes.append(
             SceneData(
                 id=len(self.scenes),
@@ -406,34 +326,9 @@ class InteractiveConversionTool:
             )
         )
         self.viewer.add_to_scene_tab(
-            len(self.scenes) - 1, description, self._load_scene, self._save_scene, self._save_encoding_params
+            len(self.scenes) - 1, description, self.load_scene, self._save_scene, self._save_encoding_params
         )
-        self._load_scene(len(self.scenes) - 1)
-
-    def _build_description(self, encoding_params: EncodingParams, output_format: str) -> str:
-        description = "**Template**  \n"
-        description += f"{output_format}  \n"
-        changed_params_desc = ""
-
-        initial_params: EncodingParams = EncodingParams.from_yaml_file(
-            Path(f"src/ffsplat/conf/format/{output_format}.yaml")
-        )
-        for op_id, op in enumerate(self.encoding_params.ops):
-            for transform_id, transform in enumerate(op["transforms"]):
-                if transform != initial_params.ops[op_id]["transforms"][transform_id]:
-                    if isinstance(op["input_fields"], list):
-                        changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
-                    else:
-                        changed_params_desc += (
-                            f"input fields from prefix: {op["input_fields"]["from_fields_with_prefix"]}\n"
-                        )
-                    changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
-
-        if changed_params_desc != "":
-            description += "**Customized Transformations**  \n"
-            description += changed_params_desc
-
-        return description
+        self.load_scene(len(self.scenes) - 1)
 
     def _save_scene(self, scene_id):
         print(f"Saving scene {scene_id}...")
@@ -450,7 +345,7 @@ class InteractiveConversionTool:
         if self.scenes[scene_id].encoding_params:
             self.scenes[scene_id].encoding_params.to_yaml_file(params_path)
 
-    def _load_scene(self, scene_id):
+    def load_scene(self, scene_id):
         print(f"Loading scene {scene_id}...")
 
         # update the load buttons
@@ -480,33 +375,21 @@ class InteractiveConversionTool:
                 self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
 
     def full_evaluation(self, _):
-        self._disable_load_buttons()
-        self.viewer._convert_button.disabled = True
+        self.disable_load_buttons()
+        self.disable_convert_ui()
         self.viewer.eval_button.disabled = True
-        self.viewer._live_preview_checkbox.disabled = True
-        self.table_rows = ""
-        with self.lock_scenes:
-            for scene in self.scenes:
-                if scene.scene_metrics is None:
-                    self.viewer.eval_info.visible = True
-                    self.viewer.eval_info.content = f"Running evaluation for scene {scene.id}..."
-                    self.viewer.eval_progress.visible = True
-                    self.viewer.eval_progress.value = 0
-                    self._load_scene(scene.id)
-                    self._eval(scene.id)
-                self.table_rows += get_table_row(scene.id, scene.scene_metrics)
-                self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
+        self.viewer.eval_info.visible = True
+        self.viewer.eval_info.content = "Running evaluation..."
+        self.update_eval_progress(0)
+        self.viewer.eval_progress.visible = True
+
+        self.runner.run_evaluation()
+
         self.viewer.eval_info.visible = False
         self.viewer.eval_progress.visible = False
         self.viewer.eval_button.disabled = False
-        self.viewer._convert_button.disabled = False
-        self.viewer._live_preview_checkbox.disabled = False
-        self._enable_load_buttons()
-
-    def deactivate_live_preview(
-        self,
-    ):
-        self.viewer._live_preview_checkbox.value = False
+        self.enable_convert_ui()
+        self.enable_load_buttons()
 
     def _build_transform_folder(self, transform_folder, description, transformation, transform_type):
         # clear transform folder for rebuild
@@ -596,7 +479,7 @@ class InteractiveConversionTool:
     def reset_dynamic_params_gui(self, _):
         self._load_encoding_params()
         self._build_convert_options()
-        self.conversion_wrapper(None, True)
+        self.runner.update_live_preview(copy.deepcopy(self.encoding_params))
 
     def _load_encoding_params(self):
         output_format = self.viewer._output_dropdown.value
@@ -628,48 +511,6 @@ class InteractiveConversionTool:
                         )
 
                     self._build_transform_folder(transform_folder, description, transformation, transform_type)
-
-    def _eval(self, scene_id):
-        print("Running evaluation...")
-        device = "cuda"
-        ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
-        psnr = PeakSignalNoiseRatio(data_range=1.0).to(device)
-        lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=False).to(device)
-
-        valloader = torch.utils.data.DataLoader(self.dataset, batch_size=1, shuffle=False, num_workers=1)
-        elapsed_time = 0
-        metrics = defaultdict(list)
-
-        imgs_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/imgs")
-        if self.viewer._live_preview_checkbox.value and scene_id == len(self.scenes) - 1:
-            imgs_path = None
-
-        for i, data in enumerate(valloader):
-            elapsed_time += eval_step(
-                self.gaussians,
-                self.dataset.white_background,
-                imgs_path,
-                device,
-                i,
-                metrics,
-                psnr,
-                ssim,
-                lpips,
-                data,
-            )
-            self.viewer.eval_progress.value = (i + 1) / len(valloader) * 100
-
-        elapsed_time /= len(valloader)
-
-        size = get_directory_size(self.scenes[scene_id].data_path)
-
-        stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
-        stats.update({
-            "elapsed_time": elapsed_time,
-            "num_GS": len(self.gaussians.means.data),
-            "size": size,
-        })
-        self.scenes[scene_id].scene_metrics = stats
 
     @torch.no_grad()
     def render_fn(
@@ -709,16 +550,24 @@ class InteractiveConversionTool:
         render_rgbs: Float[NDArray, "H W 3"] = render_colors[0, ..., 0:3].cpu().numpy()
         return render_rgbs
 
-    def _disable_load_buttons(self):
+    def disable_load_buttons(self):
         self.enable_scene_loading = False
         for button in self.viewer.load_buttons:
             button.disabled = True
 
-    def _enable_load_buttons(self):
+    def enable_load_buttons(self):
         self.enable_scene_loading = True
         for button in self.viewer.load_buttons:
             button.disabled = False
         self.viewer.load_buttons[self.current_scene].disabled = True
+
+    def disable_convert_ui(self):
+        self.viewer._convert_button.disabled = True
+        self.viewer._live_preview_checkbox.disabled = True
+
+    def enable_convert_ui(self):
+        self.viewer._convert_button.disabled = False
+        self.viewer._live_preview_checkbox.disabled = False
 
     # Create render function with bound parameters
     def bound_render_fn(self, camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
@@ -751,7 +600,7 @@ class InteractiveConversionTool:
 
             if rebuild_fn:
                 rebuild_fn()
-            self.conversion_wrapper(None, from_update=True)
+            self.runner.update_live_preview(copy.deepcopy(self.encoding_params))
 
         return update_field
 
@@ -769,21 +618,234 @@ class InteractiveConversionTool:
                 dict_to_update[key] = gui_event.target.value
             if rebuild_fn:
                 rebuild_fn()
-            self.conversion_wrapper(None, from_update=True)
+            self.runner.update_live_preview(copy.deepcopy(self.encoding_params))
 
         return update_field
 
     def live_preview_callback(self, _):
-        if not self.viewer._live_preview_checkbox.value:
-            if self.preview_in_scenes:
-                self.preview_in_scenes = False
-                self.remove_last_scene()
-                self.current_scene = len(self.scenes) - 1
-                self._load_scene(len(self.scenes) - 1)
+        """callback for live preview checkbox"""
+        self.live_preview_active = self.viewer._live_preview_checkbox.value
+        if not self.live_preview_active:
             self.viewer._convert_button.label = "Convert"
         else:
             self.viewer._convert_button.label = "Save to scene list"
-        self.conversion_wrapper(None, True)
+        self.runner.update_live_preview(copy.deepcopy(self.encoding_params))
+
+    def convert_button_callback(self, _):
+        if self.live_preview_active:
+            self.runner.save_live_preview()
+        else:
+            self.runner.run_conversion(copy.deepcopy(self.encoding_params))
+
+    def update_eval_progress(self, value: int):
+        self.viewer.eval_progress.value = 0
+
+
+class Runner:
+    """
+    This class handles all evaluations and conversions from the InteractiveConversionTool.
+    It exposes three main functionalities: update_live_preview, save_live_preview, run_conversion and run_evaluation.
+    These functions are executed in a thread pool.
+    """
+
+    def __init__(self, conv_tool: InteractiveConversionTool) -> None:
+        self.conv_tool: InteractiveConversionTool = conv_tool
+        self.conversion_queue: list[EncodingParams] = []
+        self.live_conversion_running: bool = False
+        self.preview_in_scenes: bool = False
+
+        # locks access to the conversion_queue
+        self.lock_queue = threading.Lock()
+
+        # ensures that only one process is currently running
+        self.process_lock = threading.Lock()
+
+    def save_live_preview(self):
+        """Save live preview to scenes."""
+
+        if not self.conv_tool.live_preview_active:
+            return
+
+        with self.process_lock:
+            # copy results from live preview to saved scene directory
+            output_path = Path(self.conv_tool.temp_dir.name + f"/gaussians{len(self.conv_tool.scenes)}")
+            preview_path = Path(self.conv_tool.temp_dir.name + "/livepreview")
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            shutil.copytree(preview_path, output_path, dirs_exist_ok=True)
+
+            self.conv_tool.scenes[-1].data_path = output_path
+            self.conv_tool.scenes[-1].description = self._build_description(self.conv_tool.encoding_params)
+            self.conv_tool.last_scene_description = self.conv_tool.scenes[-1].description
+
+            self.conv_tool.add_scene(
+                "Live preview from conversion", preview_path, "smurfx", self.conv_tool.encoding_params
+            )
+
+            self.conv_tool.scenes[-1].scene_metrics = self.conv_tool.scenes[-2].scene_metrics
+            self.conv_tool.update_eval_table()
+
+    def update_live_preview(self, new_encoding_params: EncodingParams):
+        """Adds task to the conversion_queue. If no live preview update is running, it starts updating the preview, otherwise it returns."""
+
+        if not self.conv_tool.live_preview_active:
+            if self.preview_in_scenes:
+                self.preview_in_scenes = False
+                self.conv_tool.remove_last_scene()
+                self.conv_tool.current_scene = len(self.conv_tool.scenes) - 1
+                self.conv_tool.load_scene(len(self.conv_tool.scenes) - 1)
+            return
+
+        with self.lock_queue:
+            self.conversion_queue.append(new_encoding_params)
+
+            # we only want to work on one conversion simultaneously
+            if self.live_conversion_running:
+                return
+            else:
+                self.live_conversion_running = True
+                self.conv_tool.disable_convert_ui()
+
+        with self.process_lock:
+            while True:
+                with self.lock_queue:
+                    if not self.conversion_queue:
+                        self.conv_tool.enable_convert_ui()
+                        self.live_conversion_running = False
+                        break
+                    encoding_params = self.conversion_queue.pop()
+                    self.conversion_queue.clear()
+                self.conv_tool.viewer.scene_label.content = "Running conversion for live preview..."
+                # clear previous live preview
+                output_path = Path(self.conv_tool.temp_dir.name + "/livepreview")
+                if output_path.exists() and output_path.is_dir():
+                    shutil.rmtree(output_path)
+                if self.preview_in_scenes:
+                    self.conv_tool.remove_last_scene()
+                else:
+                    self.preview_in_scenes = True
+
+                try:
+                    self._convert(encoding_params, output_path)
+                except Exception as e:
+                    print(f"Exception occurred: {e}")
+                    self.conv_tool.viewer.scene_label.content = "Conversion for live preview failed."
+
+    def run_conversion(self, new_encoding_params: EncodingParams):
+        with self.process_lock:
+            self.conv_tool.disable_convert_ui()
+            output_path = Path(self.conv_tool.temp_dir.name + f"/gaussians{len(self.conv_tool.scenes)}")
+            try:
+                self._convert(new_encoding_params, output_path)
+            except Exception as e:
+                self.conv_tool.enable_convert_ui()
+                print(f"Exception occurred: {e}")
+                return
+            self.conv_tool.enable_convert_ui()
+
+    # Do we want to modify this, so that the evaluation runs in the background and does not load every scene?
+    def run_evaluation(self):
+        with self.process_lock:
+            for scene in self.conv_tool.scenes:
+                if scene.scene_metrics is None:
+                    self.conv_tool.viewer.eval_info.content = f"Running evaluation for scene {scene.id}..."
+                    self.conv_tool.update_eval_progress(0)
+                    self.conv_tool.load_scene(scene.id)
+                    self._eval(scene.id)
+                self.conv_tool.update_eval_table()
+
+    def _convert(self, encoding_params: EncodingParams, output_path: Path):
+        print("Converting scene...")
+        encoder = SceneEncoder(
+            encoding_params=encoding_params,
+            output_path=output_path,
+            fields=self.conv_tool.input_gaussians.to_field_dict(),
+            decoding_params=DecodingParams(
+                container_identifier="smurfx",
+                container_version="0.1",
+                packer="ffsplat-v0.1",
+                profile=encoding_params.profile,
+                profile_version=encoding_params.profile_version,
+                scene=encoding_params.scene,
+            ),
+        )
+        encoder.encode(verbose=self.conv_tool.verbose)
+
+        # add scene to scene list and load it to view the scene
+        if not self.conv_tool.live_preview_active:
+            self.conv_tool.add_scene(self._build_description(encoding_params), output_path, "smurfx", encoding_params)
+        else:
+            self.conv_tool.add_scene("Live preview from conversion", output_path, "smurfx", encoding_params)
+        self.conv_tool.viewer.rerender(None)
+
+    def _eval(self, scene_id):
+        print(f"Running evaluation for scene {scene_id}")
+        device = "cuda"
+        ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
+        psnr = PeakSignalNoiseRatio(data_range=1.0).to(device)
+        lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=False).to(device)
+
+        valloader = torch.utils.data.DataLoader(self.conv_tool.dataset, batch_size=1, shuffle=False, num_workers=1)
+        elapsed_time = 0
+        metrics = defaultdict(list)
+
+        imgs_path = Path(self.conv_tool.viewer.results_path_input.value) / Path(f"scene_{scene_id}/imgs")
+        if self.conv_tool.live_preview_active and scene_id == len(self.conv_tool.scenes) - 1:
+            imgs_path = None
+
+        for i, data in enumerate(valloader):
+            elapsed_time += eval_step(
+                self.conv_tool.gaussians,
+                self.conv_tool.dataset.white_background,
+                imgs_path,
+                device,
+                i,
+                metrics,
+                psnr,
+                ssim,
+                lpips,
+                data,
+            )
+            self.conv_tool.viewer.eval_progress.value = (i + 1) / len(valloader) * 100
+
+        elapsed_time /= len(valloader)
+
+        size = get_directory_size(self.conv_tool.scenes[scene_id].data_path)
+
+        stats = {k: torch.stack(v).mean().item() for k, v in metrics.items()}
+        stats.update({
+            "elapsed_time": elapsed_time,
+            "num_GS": len(self.conv_tool.gaussians.means.data),
+            "size": size,
+        })
+        self.conv_tool.scenes[scene_id].scene_metrics = stats
+
+    def _build_description(self, encoding_params: EncodingParams) -> str:
+        output_format = self.conv_tool.viewer._output_dropdown.value
+
+        description = "**Template**  \n"
+        description += f"{output_format}  \n"
+        changed_params_desc = ""
+
+        initial_params: EncodingParams = EncodingParams.from_yaml_file(
+            Path(f"src/ffsplat/conf/format/{output_format}.yaml")
+        )
+        for op_id, op in enumerate(encoding_params.ops):
+            for transform_id, transform in enumerate(op["transforms"]):
+                if transform != initial_params.ops[op_id]["transforms"][transform_id]:
+                    if isinstance(op["input_fields"], list):
+                        changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
+                    else:
+                        changed_params_desc += (
+                            f"input fields from prefix: {op["input_fields"]["from_fields_with_prefix"]}\n"
+                        )
+                    changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
+
+        if changed_params_desc != "":
+            description += "**Customized Transformations**  \n"
+            description += changed_params_desc
+
+        return description
 
 
 def main():
