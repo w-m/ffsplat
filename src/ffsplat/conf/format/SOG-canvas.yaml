@@ -145,9 +145,9 @@ ops:
       - combine:
           method: concat
           dim: 2
-          to_field: quaternions
+          to_field: quats
 
-  - input_fields: [quaternions]
+  - input_fields: [quats]
     transforms:
       - simple_quantize:
           min_values: [0, 0, 0, 252]
@@ -300,18 +300,7 @@ ops:
             method: 6
             exact: true
 
-  - input_fields: [quaternions] #rgba
-    transforms:
-      - write_file:
-          type: image
-          image_codec: webp
-          coding_params:
-            lossless: true
-            quality: 100
-            method: 6
-            exact: true
-
-  - input_fields: [sh0] #rgba
+  - input_fields: [quats] #rgba
     transforms:
       - write_file:
           type: image
@@ -343,4 +332,9 @@ ops:
             quality: 100
             method: 6
             exact: true
+
+  - input_fields: [means, scales, quats, sh0, shN_centroids, shN_labels]
+    transforms:
+      - write_file:
+          type: canvas-metadata
 #TODO: decoding, output of metadata

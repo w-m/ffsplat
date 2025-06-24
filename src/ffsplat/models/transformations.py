@@ -1,3 +1,4 @@
+import json
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, override
 import cv2
 import numpy as np
 import torch
+import yaml
 from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
@@ -81,6 +83,13 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
             raise ValueError(f"Unsupported file type: {file_type}")
 
 
+def write_json(output_file_path: Path, data: dict[str, Any]) -> None:
+    """Write a dictionary to a JSON file."""
+
+    with open(output_file_path, "w") as f:
+        json.dump(data, f, indent=4)
+
+
 @dataclass
 class PLASConfig:
     """Configuration for PLAS sorting."""
@@ -116,7 +125,7 @@ class Transformation(ABC):
     @staticmethod
     @abstractmethod
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         """Apply the transformation to the input fields. returns new/updated fields and decoding updates.
         Transformations that are only available for decoding do return empty decoding updates"""
@@ -132,7 +141,7 @@ class Cluster(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         # Implement the clustering logic here
         input_fields = parentOp.input_fields
@@ -198,7 +207,7 @@ class Split(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -267,7 +276,7 @@ class Remapping(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -400,7 +409,7 @@ class Reparametrize(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -520,7 +529,7 @@ class ToField(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -546,7 +555,7 @@ class Flatten(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -578,7 +587,7 @@ class Reshape(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -608,7 +617,7 @@ class Permute(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -635,7 +644,7 @@ class ToDType(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -676,7 +685,7 @@ class SplitBytes(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -728,7 +737,7 @@ class Reindex(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -756,7 +765,7 @@ class Sort(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -876,7 +885,7 @@ class PLAS(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
 
@@ -946,7 +955,7 @@ class Combine(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
         field_data: Tensor = torch.empty(0)
@@ -1014,7 +1023,7 @@ class Lookup(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -1033,8 +1042,12 @@ class WriteFile(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any],
+        parentOp: "Operation",
+        verbose: bool = False,
+        **kwargs: Any,
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        decoding_ops: list[dict[str, Any]] = kwargs.get("decoding_ops", [])
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"type": "ply", "file_path": file_path, "base_path": base_path, "field_prefix": field_prefix}:
@@ -1074,6 +1087,47 @@ class WriteFile(Transformation):
                             }
                         ],
                     })
+            case {"type": "canvas-metadata", "base_path": base_path}:
+                file_path = "meta.json"
+                output_file_path = Path(base_path) / Path(file_path)
+                field_names = list(parentOp.input_fields.keys())
+                meta = {}
+
+                for field_name in field_names:
+                    field = parentOp.input_fields[field_name]
+                    shape = field.data.shape
+                    shape_meta = [int(np.array(shape[:-1]).prod()), shape[-1]]
+                    meta[field_name] = {"shape": shape_meta, "files": []}
+                    # decoding_ops = decoding_ops['ops']
+                    for op in decoding_ops:
+                        transfroms_str = list(op["transforms"][0].keys())
+                        transform_types = [transformation_map[transform] for transform in transfroms_str]
+                        # transform = list(op['transforms'][0].keys())[0]
+                        if len(op["input_fields"]) == 0:
+                            continue
+                        input_field = op["input_fields"][0]
+                        has_field_name_prefix = input_field.startswith(field_name)
+                        # outputfiles
+                        for t_str, t in zip(transfroms_str, transform_types):
+                            if (t is WriteFile) and has_field_name_prefix:
+                                codec = op["transforms"][0][t_str].get("image_codec")
+                                # meta[field_name]["files"].append([f"{input_field}.{codec}"])
+                            # mins, maxs, dtype, in index
+                            elif (t is SimpleQuantize) and input_field == field_name:
+                                pass
+                                # mins = [0]
+                                # maxs = [0]
+                                # dtype = "hell0"
+                                # meta[field_name]["mins"] = mins
+                                # meta[field_name]["maxs"] = maxs
+                                # meta[field_name]["dtype"] = dtype
+
+                # get original_input names -> via prefix
+                # assign output file names via prefix
+                # get pre quantization mins and maxs  via ???
+
+                write_json(output_file_path, meta)
+
             case _:
                 raise ValueError(f"Unknown WriteFile parameters: {params}")
 
@@ -1152,7 +1206,7 @@ class ReadFile(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
@@ -1182,7 +1236,7 @@ class SimpleQuantize(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -1320,11 +1374,19 @@ transformation_map = {
 }
 
 
-def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
+def apply_transform(
+    parentOp: "Operation", verbose: bool, decoding_params_hashable: str
+) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
     transformation = transformation_map.get(parentOp.transform_type)
     if transformation is None:
         raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
-    return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose)
+    elif transformation is WriteFile:
+        decoding_ops: list[dict[str, Any]] = yaml.load(decoding_params_hashable, Loader=yaml.SafeLoader)["ops"]
+        return transformation.apply(
+            parentOp.params[parentOp.transform_type], parentOp, verbose=verbose, decoding_ops=decoding_ops
+        )
+    else:
+        return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose=verbose)
 
 
 def get_dynamic_params(params: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
