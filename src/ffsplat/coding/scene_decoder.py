@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -47,6 +48,9 @@ class DecodingParams:
         self.ops[0]["transforms"][0]["read_file"]["file_path"] = str(input_path)
         return self
 
+    def get_ops_hashable(self) -> str:
+        return json.dumps(self.ops, sort_keys=False)
+
 
 @lru_cache
 def process_operation(
@@ -56,7 +60,7 @@ def process_operation(
     """Process the operation and return the new fields and decoding updates."""
     if verbose:
         print(f"Decoding {op}...")
-    return op.apply(verbose=verbose)[0]
+    return op.apply(verbose=verbose, decoding_params_hashable="")[0]
 
 
 @dataclass
