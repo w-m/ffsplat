@@ -18,7 +18,6 @@ ops:
           split_size_or_sections: [1, 15]
           dim: 1
           squeeze: true #false
-          #TODO: in sogs transpose (1,2) is done after reading from .ply here not?
 
   - input_fields: [means]
     transforms:
@@ -116,20 +115,17 @@ ops:
           src_field: quaternions
           index_field: sorted_indices
 
-  - input_fields: [quaternions] #pack quaternions
+  - input_fields: [quaternions] # for tracking decoding_ops
+    transforms:
+      - to_field:
+          to_field_name: quats
+
+  - input_fields: [quats]
     transforms:
       - reparametize:
           method: pack_dynamic
           to_fields_with_prefix: quaternions_packed_
           dim: -1
-
-  #- input_fields: [quaternions_packed_values,quaternions_packed_indices]
-  #transforms:
-  #- reparametize:
-  #method: unpack_dynamic
-  #dim: 2
-  #from_fields_with_prefix: quaternions_packed_
-  #to_field_name: quaternions_new
 
   - input_fields: [quaternions_packed_values]
     transforms:
@@ -311,6 +307,17 @@ ops:
             method: 6
             exact: true
 
+  - input_fields: [sh0] #rgb
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
   - input_fields: [shN_centroids] #rgb
     transforms:
       - write_file:
@@ -333,8 +340,8 @@ ops:
             method: 6
             exact: true
 
-  - input_fields: [means, scales, quats, sh0, shN_centroids, shN_labels]
+  - input_fields: [means, scales, quats, sh0, shN]
     transforms:
       - write_file:
           type: canvas-metadata
-#TODO: decoding, output of metadata
+#TODO: decoding,
