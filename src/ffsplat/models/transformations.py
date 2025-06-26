@@ -92,7 +92,7 @@ def write_json(output_file_path: Path, data: dict[str, Any]) -> None:
     """Write a dictionary to a JSON file."""
 
     with open(output_file_path, "w") as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, indent=2)
 
 
 @dataclass
@@ -1096,40 +1096,51 @@ class WriteFile(Transformation):
                 file_path = "meta.json"
                 output_file_path = Path(base_path) / Path(file_path)
                 field_names = list(parentOp.input_fields.keys())
-                meta = {}
-
+                meta: dict[str, Any] = {}
+                # Readfile no input_fields
                 for field_name in field_names:
                     field = parentOp.input_fields[field_name]
                     shape = field.data.shape
                     shape_meta = [int(np.array(shape[:-1]).prod()), shape[-1]]
-                    meta[field_name] = {"shape": shape_meta, "files": []}
-                    # decoding_ops = decoding_ops['ops']
-                    for op in decoding_ops:
-                        transfroms_str = list(op["transforms"][0].keys())
-                        transform_types = [transformation_map[transform] for transform in transfroms_str]
-                        # transform = list(op['transforms'][0].keys())[0]
-                        if len(op["input_fields"]) == 0:
-                            continue
-                        input_field = op["input_fields"][0]
-                        has_field_name_prefix = input_field.startswith(field_name)
-                        # outputfiles
-                        for t_str, t in zip(transfroms_str, transform_types):
-                            if (t is WriteFile) and has_field_name_prefix:
-                                codec = op["transforms"][0][t_str].get("image_codec")
-                                # meta[field_name]["files"].append([f"{input_field}.{codec}"])
-                            # mins, maxs, dtype, in index
-                            elif (t is SimpleQuantize) and input_field == field_name:
-                                pass
-                                # mins = [0]
-                                # maxs = [0]
-                                # dtype = "hell0"
-                                # meta[field_name]["mins"] = mins
-                                # meta[field_name]["maxs"] = maxs
-                                # meta[field_name]["dtype"] = dtype
+                    if field_name == "sh0":
+                        shape_meta = [shape_meta[0], 1, shape_meta[1]]
+                    # to keep the order semi-consistent with original sogs
+                    meta[field_name] = {"shape": shape_meta, "dtype": None, "mins": [], "maxs": [], "files": []}
 
-                # get original_input names -> via prefix
-                # assign output file names via prefix
-                # get pre quantization mins and maxs  via ???
+                    for op in decoding_ops:
+                        transforms_str = [next(iter(t_str_braced.keys())) for t_str_braced in op["transforms"]]
+                        transform_types = [transformation_map[transform] for transform in transforms_str]
+                        input_field = op["input_fields"][0] if len(op["input_fields"]) > 0 else ""
+                        for idx, (t_str, t) in enumerate(zip(transforms_str, transform_types)):
+                            if t is ReadFile:
+                                field_name_read = op["transforms"][idx][t_str].get("field_name")
+                                if field_name_read.startswith(field_name):
+                                    codec = op["transforms"][idx][t_str].get("image_codec")
+                                    meta[field_name]["files"].append(f"{field_name_read}.{codec}")
+                            elif (
+                                (t is SimpleQuantize)
+                                and input_field.startswith(field_name)
+                                and not input_field.endswith("labels")
+                            ):
+                                meta[field_name]["dtype"] = op["transforms"][idx][t_str]["dtype"]
+                                meta[field_name]["mins"] = op["transforms"][idx][t_str]["min_values"]
+                                meta[field_name]["maxs"] = op["transforms"][idx][t_str]["max_values"]
+                            elif t is Reparametrize:
+                                if op["transforms"][idx][t_str].get("method") == "unpack_dynamic":
+                                    to_field_name = op["transforms"][idx][t_str].get("to_field_name")
+                                    if to_field_name == field_name:
+                                        meta[to_field_name]["encoding"] = "quaternion_packed"
+
+                    # inconsitencies in sogs, that are hardcoded:
+                    if field_name == "quats":
+                        if "mins" in meta[field_name]:
+                            del meta[field_name]["mins"]
+                        if "maxs" in meta[field_name]:
+                            del meta[field_name]["maxs"]
+                        meta[field_name]["dtype"] = "uint8"  # is also hardcoded in sogs
+                    if field_name == "shN":
+                        # because is 8 by default and it's the only parameter requiring encoding parameters of more than one step back
+                        meta[field_name]["quantization"] = 8
 
                 write_json(output_file_path, meta)
 
@@ -1269,6 +1280,13 @@ class SimpleQuantize(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
+        torch_dtype_to_str = {
+            torch.float32: "float32",
+            torch.uint8: "uint8",
+            torch.uint16: "uint16",
+            torch.uint32: "uint32",
+            torch.int32: "int32",
+        }
         match params:
             case {"min": min_val, "max": max_val, "dim": dim, "dtype": dtype_str, "round_to_int": round_to_int}:
                 min_val_f = float(min_val)
@@ -1284,14 +1302,6 @@ class SimpleQuantize(Transformation):
                 normalized = normalized * (max_val_f - min_val_f) + min_val_f
 
                 field_data = normalized
-
-                torch_dtype_to_str = {
-                    torch.float32: "float32",
-                    torch.uint8: "uint8",
-                    torch.uint16: "uint16",
-                    torch.uint32: "uint32",
-                    torch.int32: "int32",
-                }
 
                 decoding_update.append({
                     "input_fields": [field_name],
@@ -1336,6 +1346,20 @@ class SimpleQuantize(Transformation):
 
                 field_data = minmax(field_data)
                 field_data = field_data * field_range + min_tensor
+
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "simple_quantize": {
+                                "min_values": min_tensor.tolist(),
+                                "max_values": max_tensor.tolist(),
+                                "dim": dim,
+                                "dtype": torch_dtype_to_str[field_data.dtype],
+                            }
+                        }
+                    ],
+                })
 
                 if round_to_int:
                     field_data = torch.round(field_data)
