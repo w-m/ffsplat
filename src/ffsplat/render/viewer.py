@@ -14,6 +14,15 @@ from jaxtyping import Float32, UInt8
 
 from ._renderer import Renderer, RenderTask
 
+available_output_format: list[str] = [
+    "3DGS_INRIA_ply",
+    "3DGS_INRIA_nosh_ply",
+    "SOG-web",
+    "SOG-web-nosh",
+    "SOG-web-sh-split",
+    "SOG-canvas",
+]
+
 
 @dataclasses.dataclass
 class CameraState:

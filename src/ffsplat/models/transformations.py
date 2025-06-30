@@ -490,7 +490,7 @@ class Reparametrize(Transformation):
                     raise ValueError(f"Field data shape mismatch for unit sphere recovery: {field_data.shape}")
 
                 # Ensure indices are integers
-                indices_field = indices_field.to(torch.int64).squeeze(-1)
+                indices_field = indices_field.round().to(torch.int64).squeeze(-1)
 
                 # Compute squared norm of the partial vector
                 partial_norm_sq = (values_field**2).sum(dim=dim, keepdim=True)
@@ -573,6 +573,11 @@ class Flatten(Transformation):
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"start_dim": start_dim, "end_dim": end_dim}:
+                target_shape = field_data.shape
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"reshape": {"shape": target_shape}}],
+                })
                 field_data = field_data.flatten(start_dim=start_dim, end_dim=end_dim)
             case {"start_dim": start_dim}:
                 target_shape = field_data.shape[start_dim:]
@@ -603,6 +608,10 @@ class Reshape(Transformation):
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"start_dim": start_dim, "shape": shape}:
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"reshape": {"shape": field_data.shape}}],
+                })
                 target_shape = list(field_data.shape[:start_dim]) + list(shape)
                 field_data = field_data.reshape(*target_shape)
             case {"shape": shape}:
@@ -752,14 +761,14 @@ class Reindex(Transformation):
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
-                # if len(index_field_obj.data.shape) != 2:
-                # raise ValueError("Expecting grid for re-index operation")
-                decoding_update.append({
-                    "input_fields": [src_field_name],
-                    "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
-                })
                 original_data = input_fields[src_field_name].data
                 new_fields[src_field_name] = Field(original_data[index_field_obj.data], parentOp)
+
+                if index_field_obj.data.ndim > 1:
+                    decoding_update.append({
+                        "input_fields": [src_field_name],
+                        "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
+                    })
             case _:
                 raise ValueError(f"Unknown Reindex parameters: {params}")
 
@@ -791,8 +800,6 @@ class Sort(Transformation):
                 sorted_indices = torch.argsort(field_data)
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
-        # sorted_indices = sorted_indeces.reshape(params.get("shape",(64,-1)))
-        # new_fields[field_name] = Field(field_data_sorted, parentOp)
         new_fields[params["to_field"]] = Field(sorted_indices, parentOp)
 
         # TODO: decoding update???
@@ -992,31 +999,39 @@ class Combine(Transformation):
                 tensors: list[Tensor] = [
                     parentOp.input_fields[source_field_name].data for source_field_name in parentOp.input_fields
                 ]
+                decoding_update_dict = {
+                    "input_fields": [to_field_name],
+                    "transforms": [
+                        {
+                            "split": {
+                                "dim": dim,
+                                "to_field_list": list(parentOp.input_fields),
+                            }
+                        }
+                    ],
+                }
                 if method == "stack":
                     field_data = torch.stack(tensors, dim=dim)
+                    decoding_update_dict["transforms"][0]["split"]["squeeze"] = (True,)
                 elif method == "concat":
                     field_data = torch.cat(tensors, dim=dim)
+                    decoding_update_dict["transforms"][0]["split"]["squeeze"] = False
                 elif method == "stack-zeros":
                     zeros = torch.zeros(tensors[0].shape, dtype=tensors[0].dtype, device=tensors[0].device)
                     tensors.append(zeros)
                     field_data = torch.stack(tensors, dim=dim)
-                    decoding_update.append({
-                        "input_fields": [to_field_name],
-                        "transforms": [
-                            {
-                                "split": {
-                                    "split_size_or_sections": [
-                                        t.shape[dim] if dim < len(t.shape) else 1 for t in tensors
-                                    ]
-                                    + [1],
-                                    "dim": dim,
-                                    "to_field_list": [*list(parentOp.input_fields), "_"],
-                                }
-                            }
-                        ],
-                    })
+                    decoding_update_dict["transforms"][0]["split"]["squeeze"] = True
+                    decoding_update_dict["transforms"][0]["split"]["to_field_list"] = [
+                        *list(parentOp.input_fields),
+                        "_",
+                    ]
+
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
+                decoding_update_dict["transforms"][0]["split"]["split_size_or_sections"] = [
+                    t.shape[dim] if dim < len(t.shape) else 1 for t in tensors
+                ]
+                decoding_update.append(decoding_update_dict)
                 new_fields[to_field_name] = Field(field_data, parentOp)
             case _:
                 raise ValueError(f"Unknown Combine parameters: {params}")
@@ -1259,6 +1274,8 @@ class ReadFile(Transformation):
                         # TODO: only do this once?
                         register_avif_opener()
                         img_field_data = torch.tensor(np.array(Image.open(file_path)))
+                    case "webp":
+                        img_field_data = torch.tensor(np.array(Image.open(file_path)))
 
                 new_fields[field_name] = Field.from_file(img_field_data, file_path, field_name)
             case _:
@@ -1308,10 +1325,11 @@ class SimpleQuantize(Transformation):
                     "transforms": [
                         {
                             "simple_quantize": {
-                                "min_values": min_vals.tolist(),
-                                "max_values": max_vals.tolist(),
+                                "min_values": min_vals.tolist() if min_vals.ndim > 0 else [min_vals.item()],
+                                "max_values": max_vals.tolist() if max_vals.ndim > 0 else [max_vals.item()],
                                 "dim": dim,
                                 "dtype": torch_dtype_to_str[field_data.dtype],
+                                "round_to_int": False,  # in backmapping usually don't want rounding, right?
                             }
                         }
                     ],
@@ -1330,6 +1348,9 @@ class SimpleQuantize(Transformation):
             }:
                 if field_data is None:
                     raise ValueError("Field data is None before channelwise remapping")
+
+                min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+                max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
 
                 min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
                 max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
@@ -1352,10 +1373,11 @@ class SimpleQuantize(Transformation):
                     "transforms": [
                         {
                             "simple_quantize": {
-                                "min_values": min_tensor.tolist(),
-                                "max_values": max_tensor.tolist(),
+                                "min_values": min_vals.tolist(),
+                                "max_values": max_vals.tolist(),
                                 "dim": dim,
                                 "dtype": torch_dtype_to_str[field_data.dtype],
+                                "round_to_int": False,  # in backmapping usually don't want rounding, right?
                             }
                         }
                     ],
@@ -1366,7 +1388,7 @@ class SimpleQuantize(Transformation):
                 field_data = convert_to_dtype(field_data, dtype_str)
 
             case _:
-                raise ValueError(f"Unknown remapping parameters: {params}")
+                raise ValueError(f"Unknown simple_quantize parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
 
