@@ -482,7 +482,8 @@ class Reparametrize(Transformation):
                 "to_field_name": to_field_name,
             }:
                 # Retrieve the indices and values fields
-                indices_field = input_fields[f"{from_fields_with_prefix}indices"].data
+                # indices_field = input_fields[f"{from_fields_with_prefix}indices"].data
+                # Debug: check if indices_field contains anything else than the number 3
                 values_field = input_fields[f"{from_fields_with_prefix}values"].data
 
                 if values_field is None:
@@ -490,12 +491,8 @@ class Reparametrize(Transformation):
                 if values_field.shape[dim] != 3:
                     raise ValueError(f"Field data shape mismatch for unit sphere recovery: {field_data.shape}")
 
-                # Ensure indices are integers
-                indices_field = indices_field.round().to(torch.int64).squeeze(-1)
-
-                # Compute squared norm of the partial vector
+                # indices_field = indices_field.round().to(torch.int64).squeeze(-1) # indices_field is useless, all are 3
                 partial_norm_sq = (values_field**2).sum(dim=dim, keepdim=True)
-
                 # Recover the missing component (always non-negative)
                 w = torch.sqrt(torch.clamp(1.0 - partial_norm_sq, min=0.0))
 
@@ -505,24 +502,12 @@ class Reparametrize(Transformation):
                     *values_field.shape[:-1], num_components, dtype=values_field.dtype, device=values_field.device
                 )
 
-                # Scatter the values back into the reconstructed tensor
-                reconstructed.scatter_(-1, indices_field.unsqueeze(-1), src=w)
-
-                # Dynamically place values_field into the indices not covered by indices_field
-                full_indices = torch.arange(num_components, device=values_field.device).view(1, -1)
-
-                indices_field_exp = indices_field.unsqueeze(-1)
-
-                # correct positions of values
-                value_mask = (full_indices != indices_field_exp).to(values_field.dtype)
-
-                # Set values_field into the masked slots
-                value_positions = value_mask.bool()
-                reconstructed[value_positions] = values_field.flatten()
+                # For wxyz convention
+                reconstructed[..., 0] = w.squeeze(-1)
+                reconstructed[..., 1:] = values_field
 
                 # Optional re-normalization to mitigate numerical drift
                 field_data = reconstructed / torch.linalg.norm(reconstructed, dim=dim, keepdim=True)
-
                 new_fields[to_field_name] = Field(field_data, parentOp)
 
             case _:
