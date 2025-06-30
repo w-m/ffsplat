@@ -195,6 +195,8 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_nosh_ply.yaml"))
         case "SOG-web":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web.yaml"))
+        case "SOG-web-png":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-png.yaml"))
         case "SOG-web-nosh":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-nosh.yaml"))
         case "SOG-web-sh-split":

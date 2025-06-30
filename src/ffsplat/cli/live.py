@@ -38,6 +38,7 @@ available_output_format: list[str] = [
     "3DGS_INRIA_ply",
     "3DGS_INRIA_nosh_ply",
     "SOG-web",
+    "SOG-web-png",
     "SOG-web-nosh",
     "SOG-web-sh-split",
 ]
