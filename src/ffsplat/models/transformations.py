@@ -235,6 +235,7 @@ class Split(Transformation):
                     if squeeze:
                         chunk = chunk.squeeze(dim)
                     new_fields[target_field_name] = Field(chunk, parentOp)
+                to_field_list = [name for name in to_field_list if name != "_"]
 
                 decoding_update.append({
                     "input_fields": to_field_list,
@@ -798,15 +799,21 @@ class Sort(Transformation):
                 sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
             case {"method": "argsort"}:
                 sorted_indices = torch.argsort(field_data)
+            case {"method": "plas"}:
+                plas_cfg = {k: v for k, v in params.items() if k != "method"}
+                sorted_indices = PLAS.plas_preprocess(
+                    plas_cfg=PLASConfig(**plas_cfg),
+                    fields=parentOp.input_fields,
+                    verbose=verbose,
+                )
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
         new_fields[params["to_field"]] = Field(sorted_indices, parentOp)
 
-        # TODO: decoding update???
         return new_fields, decoding_update
 
 
-class PLAS(Transformation):
+class PLAS:
     @staticmethod
     def as_grid_img(tensor: Tensor) -> Tensor:
         num_primitives = tensor.shape[0]
@@ -893,26 +900,6 @@ class PLAS(Transformation):
             return primitive_filter[sorted_indices]
 
         return sorted_indices
-
-    @staticmethod
-    @override
-    def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
-    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
-        new_fields: dict[str, Field] = {}
-
-        plas_cfg_dict = params
-        if isinstance(plas_cfg_dict, dict):
-            sorted_indices = PLAS.plas_preprocess(
-                plas_cfg=PLASConfig(**plas_cfg_dict),
-                fields=parentOp.input_fields,
-                verbose=verbose,
-            )
-            new_fields[plas_cfg_dict["to_field"]] = Field(sorted_indices, parentOp)
-        else:
-            raise TypeError(f"Unknown PLAS parameters: {params}")
-
-        return new_fields, []
 
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1435,7 +1422,6 @@ transformation_map = {
     "split_bytes": SplitBytes,
     "reindex": Reindex,
     "sort": Sort,
-    "plas": PLAS,
     "lookup": Lookup,
     "combine": Combine,
     "write_file": WriteFile,

@@ -43,7 +43,8 @@ ops:
 
   - input_fields: [means, sh0, shN, opacities, scales, quaternions]
     transforms:
-      - plas:
+      - sort:
+          method: plas
           prune_by: opacities # in sogs pruned by 0.5 of number gaussians instead
           scaling_fn: none #standardize
           # activated: true
