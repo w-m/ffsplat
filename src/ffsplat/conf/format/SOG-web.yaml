@@ -44,7 +44,8 @@ ops:
         quaternions,
       ]
     transforms:
-      - plas:
+      - sort:
+          method: plas
           prune_by: opacities
           scaling_fn: standardize
           # activated: true
