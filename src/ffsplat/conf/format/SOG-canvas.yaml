@@ -17,7 +17,7 @@ ops:
           to_field_list: [sh0, shN] #in sogs f_dc=sh0, frest=shN
           split_size_or_sections: [1, 15]
           dim: 1
-          squeeze: true #false
+          squeeze: false
 
   - input_fields: [means]
     transforms:
@@ -44,7 +44,7 @@ ops:
   - input_fields: [means, sh0, shN, opacities, scales, quaternions]
     transforms:
       - plas:
-          prune_by: opacities # in sogs purned by 0.5 of number gaussians instead
+          prune_by: opacities # in sogs pruned by 0.5 of number gaussians instead
           scaling_fn: none #standardize
           # activated: true
           shuffle: true
@@ -170,6 +170,13 @@ ops:
           start_dim: 2
           shape: [1]
 
+  - input_fields: [sh0]
+    transforms:
+      - permute:
+          dims: [0, 1, 3, 2]
+      - flatten:
+          start_dim: 2
+
   - input_fields: [sh0, opacities] #opacity-sh0 rgba
     transforms:
       - combine:
@@ -186,11 +193,13 @@ ops:
           dtype: uint8
           round_to_int: true
 
-  ##shN
   - input_fields: [shN]
     transforms:
-      - reshape:
-          shape: [-1, 45] # 3*15 spherical harmonics
+      - flatten:
+          start_dim: 2
+      - flatten:
+          start_dim: 0
+          end_dim: 1
       - cluster:
           method: kmeans
           num_clusters: 65536 #is dynamic in sogs
@@ -344,4 +353,3 @@ ops:
     transforms:
       - write_file:
           type: canvas-metadata
-#TODO: decoding,
