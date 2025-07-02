@@ -677,7 +677,7 @@ class Runner:
 
             self.conv_tool.scenes[-1].data_path = output_path
             self.conv_tool.scenes[-1].description = self._build_description(self.conv_tool.encoding_params)
-            self.conv_tool.last_scene_description = self.conv_tool.scenes[-1].description
+            self.conv_tool.viewer.last_scene_description.content = self.conv_tool.scenes[-1].description
 
             self.conv_tool.add_scene(
                 "Live preview from conversion", preview_path, "smurfx", self.conv_tool.encoding_params
