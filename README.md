@@ -6,69 +6,54 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/w-m/ffsplat)](https://img.shields.io/github/commit-activity/m/w-m/ffsplat)
 [![License](https://img.shields.io/github/license/w-m/ffsplat)](https://img.shields.io/github/license/w-m/ffsplat)
 
-A conversion tool for splatting scenes.
+ffsplat is a powerful framework to convert and compress 3D Gaussian Splatting scenes.
+
+**NOTE: this code is pre-alpha, under heavy development, a community developer preview. Please expect more documentation in the coming weeks (July 2025).**
 
 - **Github repository**: <https://github.com/w-m/ffsplat/>
-- **Documentation** <https://w-m.github.io/ffsplat/>
 
-## Getting started with your project
+## Quick Start
 
-### 1. Create a New Repository
+- Install CUDA 12.x
+- Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
-First, create a repository on GitHub with the same name as this project, and then run the following commands:
+Run
 
-```bash
-git init -b main
-git add .
-git commit -m "init commit"
-git remote add origin git@github.com:w-m/ffsplat.git
-git push -u origin main
+`uvx --from git+https://github.com/w-m/ffsplat@main ffsplat-live --help`
+
+Then open a web browser to [localhost:8080](http://localhost:8080) (or the address that is printed in the viser box on stdout).
+
+## Setting up a dev environment
+
+Check out the project with submodules:
+
+```
+git clone --recurse-submodules https://github.com/w-m/ffsplat.git
+cd ffsplat
 ```
 
-### 2. Set Up Your Development Environment
-
-Then, install the environment and the pre-commit hooks with
+Set up the virtual environment with uv:
 
 ```bash
 make install
 ```
 
-This will also generate your `uv.lock` file
-
-### 3. Run the pre-commit hooks
-
-Initially, the CI/CD pipeline might be failing due to formatting issues. To resolve those run:
+Run the live encoding:
 
 ```bash
-uv run pre-commit run -a
+uv run -m ffsplat.cli.live \
+    --input /data/gaussian_splatting/mini-splatting2/truck_sparse/point_cloud/iteration_18000/point_cloud.ply \
+    --input-format=3DGS-INRIA.ply \
+    --dataset-path /data/gaussian_splatting/tandt_db/tandt/truck/ \
+    --verbose
 ```
 
-### 4. Commit the changes
-
-Lastly, commit the changes made by the two steps above to your repository.
+Check the types and formatting of the code base:
 
 ```bash
-git add .
-git commit -m 'Fix formatting issues'
-git push origin main
+make check
 ```
 
-You are now ready to start development on your project!
-The CI/CD pipeline will be triggered when you open a pull request, merge to main, or when you create a new release.
+### 3DGS Container Format
 
-To finalize the set-up for publishing to PyPI, see [here](https://fpgmaas.github.io/cookiecutter-uv/features/publishing/#set-up-for-pypi).
-For activating the automatic documentation with MkDocs, see [here](https://fpgmaas.github.io/cookiecutter-uv/features/mkdocs/#enabling-the-documentation-on-github).
-To enable the code coverage reports, see [here](https://fpgmaas.github.io/cookiecutter-uv/features/codecov/).
-
-## Releasing a new version
-
-- Create an API Token on [PyPI](https://pypi.org/).
-- Add the API Token to your projects secrets with the name `PYPI_TOKEN` by visiting [this page](https://github.com/w-m/ffsplat/settings/secrets/actions/new).
-- Create a [new release](https://github.com/w-m/ffsplat/releases/new) on Github.
-- Create a new tag in the form `*.*.*`.
-
-For more details, see [here](https://fpgmaas.github.io/cookiecutter-uv/features/cicd/#how-to-trigger-a-release).
-
----
-
-Repository initiated with [fpgmaas/cookiecutter-uv](https://github.com/fpgmaas/cookiecutter-uv).
+Find the documentation for the encoding and decoding description, and the yaml container format in [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md).

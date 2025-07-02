@@ -1,9 +1,10 @@
 import json
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, override
+from typing import TYPE_CHECKING, Any, override
 
 import cv2
 import numpy as np
@@ -176,7 +177,7 @@ class Cluster(Transformation):
                     ],
                 })
             case _:
-                raise ValueError(f"Unknown clustering method: {params['method']}")
+                raise ValueError(f"Unknown clustering method: {params["method"]}")
         return new_fields, decoding_update
 
     @staticmethod
@@ -224,7 +225,7 @@ class Split(Transformation):
                 "to_field_list": to_field_list,
             }:
                 chunks = field_data.split(split_size_or_sections, dim)
-                for target_field_name, chunk in zip(to_field_list, chunks):
+                for target_field_name, chunk in zip(to_field_list, chunks, strict=False):
                     if target_field_name == "_":
                         continue
                     if squeeze:
@@ -1093,7 +1094,7 @@ class WriteFile(Transformation):
                         transforms_str = [next(iter(t_str_braced.keys())) for t_str_braced in op["transforms"]]
                         transform_types = [transformation_map[transform] for transform in transforms_str]
                         input_field = op["input_fields"][0] if len(op["input_fields"]) > 0 else ""
-                        for idx, (t_str, t) in enumerate(zip(transforms_str, transform_types)):
+                        for idx, (t_str, t) in enumerate(zip(transforms_str, transform_types, strict=False)):
                             if t is ReadFile:
                                 field_name_read = op["transforms"][idx][t_str].get("field_name")
                                 if field_name_read.startswith(field_name):
@@ -1195,7 +1196,7 @@ class WriteFile(Transformation):
                         coding_params.clear()
 
                 case _:
-                    raise ValueError(f"unknown image codec: {params['image_codec']}")
+                    raise ValueError(f"unknown image codec: {params["image_codec"]}")
 
         return dynamic_params_config
 
@@ -1354,7 +1355,7 @@ class SimpleQuantize(Transformation):
             case "uint32":
                 max_val = 32
             case _:
-                raise ValueError(f"Incompatible dtype {params['dtype']}")
+                raise ValueError(f"Incompatible dtype {params["dtype"]}")
 
         dynamic_params_config.append({
             "label": "n bits",

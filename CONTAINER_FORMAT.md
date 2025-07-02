@@ -87,6 +87,8 @@ We now aim to explicitly describe both the storage format and the decoding proce
 
 ## YAML Metadata Format
 
+**NOTE 2025-06-04: THE DETAILS OF THE FOLLOWING TEXT IS OUTDATED. Please look at SOG-web.yaml and 3DGS_INRIA_ply_decoding_template.yaml for a current state, until this document gets updated (#20).**
+
 We use YAML to describe the components required to render a radiance field, as it is:
 
 - Human-readable

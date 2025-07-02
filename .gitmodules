@@ -1,0 +1,4 @@
+[submodule "extern/viser"]
+	path = extern/viser
+	url = https://github.com/w-m/viser.git
+	branch = demo

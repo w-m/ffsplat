@@ -141,7 +141,7 @@ class ColmapParser(DataParser):
             image_dir = _resize_image_folder(colmap_image_dir, image_dir + "_png", factor=factor)
             image_files = sorted(_get_rel_paths(image_dir))
 
-        colmap_to_image: dict[str, str] = dict(zip(colmap_files, image_files))
+        colmap_to_image: dict[str, str] = dict(zip(colmap_files, image_files, strict=False))
         image_paths: list[str] = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
         # load one image to check the size.
@@ -159,7 +159,7 @@ class ColmapParser(DataParser):
             image_dir = _resize_image_folder(colmap_image_dir, image_dir + "_1600px", factor=factor)
 
         image_files = sorted(_get_rel_paths(image_dir))
-        colmap_to_image = dict(zip(colmap_files, image_files))
+        colmap_to_image = dict(zip(colmap_files, image_files, strict=False))
         image_paths = [os.path.join(image_dir, colmap_to_image[f]) for f in image_names]
 
         # Normalize the world space.

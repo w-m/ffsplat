@@ -147,10 +147,10 @@ def evaluation(gaussians: Gaussians, valset: Dataset, data_path: Path, results_p
         "size": size,
     })
     print(
-        f"PSNR: {stats['psnr']:.3f}, SSIM: {stats['ssim']:.4f}, LPIPS: {stats['lpips']:.3f} "
-        f"Time: {stats['elapsed_time']:.3f}s/image "
-        f"Number of GS: {stats['num_GS']} "
-        f"Size: {stats['size'] / 1024 / 1024:.3f}MB "
+        f"PSNR: {stats["psnr"]:.3f}, SSIM: {stats["ssim"]:.4f}, LPIPS: {stats["lpips"]:.3f} "
+        f"Time: {stats["elapsed_time"]:.3f}s/image "
+        f"Number of GS: {stats["num_GS"]} "
+        f"Size: {stats["size"] / 1024 / 1024:.3f}MB "
     )
 
 

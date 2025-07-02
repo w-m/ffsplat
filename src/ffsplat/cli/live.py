@@ -5,10 +5,11 @@ import tempfile
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import torch
 import viser
@@ -70,11 +71,11 @@ def create_update_field_from_bool(
 
 def get_table_row(scene, scene_metrics: dict[str, float | int]) -> str:
     table_row = f"<tr><td>{scene}</td>"
-    table_row += f"<td>{scene_metrics['psnr']:.3f}</td>"
-    table_row += f"<td>{scene_metrics['ssim']:.4f}</td>"
-    table_row += f"<td>{scene_metrics['lpips']:.3f}</td>"
-    table_row += f"<td>{scene_metrics['size'] / 1024 / 1024:.3f}</td>"
-    table_row += f"<td>{scene_metrics['num_GS']}</td>"
+    table_row += f"<td>{scene_metrics["psnr"]:.3f}</td>"
+    table_row += f"<td>{scene_metrics["ssim"]:.4f}</td>"
+    table_row += f"<td>{scene_metrics["lpips"]:.3f}</td>"
+    table_row += f"<td>{scene_metrics["size"] / 1024 / 1024:.3f}</td>"
+    table_row += f"<td>{scene_metrics["num_GS"]}</td>"
     table_row += "</tr>"
     return table_row
 
@@ -237,7 +238,7 @@ class InteractiveConversionTool:
                         changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
                     else:
                         changed_params_desc += (
-                            f"input fields from prefix: {op['input_fields']['from_fields_with_prefix']}\n"
+                            f"input fields from prefix: {op["input_fields"]["from_fields_with_prefix"]}\n"
                         )
                     changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
 
@@ -258,7 +259,7 @@ class InteractiveConversionTool:
         shutil.copytree(self.scenes[scene_id].data_path, scene_path, dirs_exist_ok=True)
 
     def _save_encoding_params(self, scene_id):
-        print(f"Saving encoding paramters from scene {scene_id}...")
+        print(f"Saving encoding parameters from scene {scene_id}...")
         params_path = Path(self.viewer.results_path_input.value) / Path(f"scene_{scene_id}/encoding_params")
         if not os.path.exists(params_path):
             os.makedirs(params_path)
@@ -418,10 +419,10 @@ class InteractiveConversionTool:
                     transform_folder = self.viewer.server.gui.add_folder(transform_type)
                     self.viewer.convert_gui_handles.append(transform_folder)
                     if isinstance(operation["input_fields"], list):
-                        description = f"input fields: {operation['input_fields']}"
+                        description = f"input fields: {operation["input_fields"]}"
                     else:
                         description = (
-                            f"input fields from prefix: {operation['input_fields']['from_fields_with_prefix']}"
+                            f"input fields from prefix: {operation["input_fields"]["from_fields_with_prefix"]}"
                         )
 
                     self._build_transform_folder(transform_folder, description, transformation, transform_type)
@@ -529,21 +530,7 @@ class InteractiveConversionTool:
         )
 
 
-def main(parser: ArgumentParser):
-    cfg = parser.parse_args()
-    InteractiveConversionTool(
-        input_path=cfg.input,
-        input_format=cfg.input_format,
-        dataset_path=cfg.dataset_path,
-        results_path=cfg.results_path,
-        verbose=cfg.verbose,
-    )
-
-    print("Viewer running... Ctrl+C to exit.")
-    time.sleep(100000)
-
-
-if __name__ == "__main__":
+def main():
     parser = ArgumentParser(description="Interactive compression tool parameters")
     parser.add_argument("--input", type=Path, required=True, help="Input file or directory path")
     # TODO: add support for guessing input format
@@ -558,4 +545,18 @@ if __name__ == "__main__":
     parser.add_argument("--results-path", type=Path, required=False, help="Path to save images from evaluation")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
-    main(parser)
+    cfg = parser.parse_args()
+    InteractiveConversionTool(
+        input_path=cfg.input,
+        input_format=cfg.input_format,
+        dataset_path=cfg.dataset_path,
+        results_path=cfg.results_path,
+        verbose=cfg.verbose,
+    )
+
+    print("Viewer running... Ctrl+C to exit.")
+    time.sleep(100000)
+
+
+if __name__ == "__main__":
+    main()

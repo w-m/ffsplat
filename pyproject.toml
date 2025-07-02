@@ -5,12 +5,11 @@ description = "A conversion tool for splatting scenes."
 authors = [{ name = "Wieland Morgenstern", email = "wieland.morgenstern@hhi.fraunhofer.de" }]
 readme = "README.md"
 keywords = ['python']
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.12,<4.0"
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -55,8 +54,7 @@ torchvision = [
 camorph = { git = "https://github.com/Fraunhofer-IIS/camorph" }
 plas = { git = "https://github.com/fraunhoferhhi/PLAS.git" }
 # newest release does not support html elements. Use a commit that does. This can be changed with the next release.
-viser = { git = "https://github.com/nerfstudio-project/viser.git" , rev = "0cb94054b29028a012aeeba11b00a5477b09a2fa"}
-
+viser = { path = "extern/viser", editable = true }
 
 [project.urls]
 Homepage = "https://w-m.github.io/ffsplat/"
@@ -67,7 +65,7 @@ Documentation = "https://w-m.github.io/ffsplat/"
 ffsplat-convert = "ffsplat.cli.convert:main"
 ffsplat-view = "ffsplat.cli.view:main"
 # ffsplat-probe = "ffsplat.cli.probe:main"
-# ffsplat-live = "ffsplat.cli.live:main"
+ffsplat-live = "ffsplat.cli.live:main"
 # ffsplat-eval = "ffsplat.cli.eval:main"
 # ffsplat-opt = "ffsplat.cli.opt:main"
 
@@ -93,7 +91,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.mypy]
 files = ["src"]
-exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*"]
+exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*", "extern/viser/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -110,7 +108,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py312"
 line-length = 120
 fix = true
 
