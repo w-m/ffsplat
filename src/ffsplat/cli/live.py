@@ -840,10 +840,10 @@ class Runner:
             for transform_id, transform in enumerate(op["transforms"]):
                 if transform != initial_params.ops[op_id]["transforms"][transform_id]:
                     if isinstance(op["input_fields"], list):
-                        changed_params_desc += "```\n" + "input fields:\n" + yaml.dump(op["input_fields"])
+                        changed_params_desc += "```\ninput fields:\n" + yaml.dump(op["input_fields"])
                     else:
                         changed_params_desc += (
-                            f"input fields from prefix: {op["input_fields"]["from_fields_with_prefix"]}\n"
+                            f"```\ninput fields from prefix: {op["input_fields"]["from_fields_with_prefix"]}\n"
                         )
                     changed_params_desc += yaml.dump(transform, default_flow_style=False) + "```  \n"
 
