@@ -10,6 +10,7 @@ from argparse import ArgumentParser
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, override
@@ -160,8 +161,6 @@ class InteractiveConversionViewer(Viewer):
     def add_scenes(self, results_path: Path):
         self.scenes_tab = self.tab_group.add_tab("Scenes")
         with self.scenes_tab:
-            if results_path is None:
-                results_path = Path("./results")
             self.results_path_input = self.server.gui.add_text("store at:", results_path.as_posix())
 
     def add_eval(self, eval_fn: Callable):
@@ -285,6 +284,9 @@ class InteractiveConversionTool:
         self.viewer = InteractiveConversionViewer(server=self.server, render_fn=self.bound_render_fn, mode="rendering")
 
         # adds scenes tab to viewer
+        if results_path is None:
+            results_path = Path("./results")
+        results_path = results_path / Path(datetime.now().replace(microsecond=0).isoformat())
         self.viewer.add_scenes(results_path)
 
         # add evaluation tab to viewer
