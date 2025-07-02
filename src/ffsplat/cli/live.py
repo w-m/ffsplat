@@ -661,7 +661,7 @@ class Runner:
         self.preview_in_scenes: bool = False
 
         # locks access to the conversion_queue
-        self.lock_queue = threading.Lock()
+        self.queue_lock = threading.Lock()
 
         # ensures that only one process is currently running
         self.process_lock = threading.Lock()
@@ -702,7 +702,7 @@ class Runner:
                 self.conv_tool.load_scene(len(self.conv_tool.scenes) - 1)
             return
 
-        with self.lock_queue:
+        with self.queue_lock:
             self.conversion_queue.append(new_encoding_params)
 
             # we only want to work on one conversion simultaneously
@@ -714,7 +714,7 @@ class Runner:
 
         with self.process_lock:
             while True:
-                with self.lock_queue:
+                with self.queue_lock:
                     if not self.conversion_queue:
                         self.conv_tool.enable_convert_ui()
                         self.live_conversion_running = False
