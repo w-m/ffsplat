@@ -184,9 +184,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 0
-            matrix_coefficients: 0
+            compression_level: 3
 
   - input_fields: [scales]
     transforms:
@@ -194,9 +192,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 444
-            matrix_coefficients: 0
+            compression_level: 3
 
   - input_fields:
       from_fields_with_prefix: means_bytes_
@@ -205,9 +201,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 444
-            matrix_coefficients: 0
+            compression_level: 3
 
   - input_fields: [quaternions]
     transforms:
@@ -215,9 +209,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 444
-            matrix_coefficients: 0
+            compression_level: 3
 
   - input_fields: [f_dc]
     transforms:
@@ -225,9 +217,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 444
-            matrix_coefficients: 1
+            compression_level: 3
 
   - input_fields: [f_rest_labels_bytes_0]
     transforms:
@@ -235,9 +225,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 0
-            matrix_coefficients: 0
+            compression_level: 3
 
   - input_fields: [f_rest_labels_bytes_1]
     transforms:
@@ -245,9 +233,7 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 0
-            matrix_coefficients: 0
+            compression_level: 3
 
   - input_fields: [f_rest_centroids]
     transforms:
@@ -255,6 +241,4 @@ ops:
           type: image
           image_codec: png
           coding_params:
-            quality: -1
-            chroma: 444
-            matrix_coefficients: 0
+            compression_level: 3
