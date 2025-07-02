@@ -370,9 +370,12 @@ class InteractiveConversionTool:
 
     def update_eval_table(self):
         self.table_rows = ""
-        for scene in self.scenes:
+        for idx, scene in enumerate(self.scenes):
             if scene.scene_metrics is not None:
-                self.table_rows += get_table_row(scene.id, scene.scene_metrics)
+                if idx == len(self.scenes) - 1 and self.live_preview_active:
+                    self.table_rows += get_table_row("live", scene.scene_metrics)
+                else:
+                    self.table_rows += get_table_row(scene.id, scene.scene_metrics)
                 self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
 
     def full_evaluation(self, _):
