@@ -1,0 +1,244 @@
+profile: SOG-web
+profile_version: 0.1
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+ops:
+  - input_fields: [sh]
+    transforms:
+      - split:
+          to_field_list: [f_dc, f_rest]
+          split_size_or_sections: [1, 15]
+          dim: 1
+          squeeze: false
+
+  - input_fields: [means]
+    transforms:
+      - remapping:
+          method: signed-log
+      - simple_quantize:
+          min: 0
+          max: 65535
+          dim: 2
+          dtype: uint16
+          round_to_int: true
+      - split_bytes:
+          to_fields_with_prefix: means_bytes_
+          num_bytes: 2
+
+  - input_fields:
+      [
+        means_bytes_0,
+        means_bytes_1,
+        f_dc,
+        f_rest,
+        opacities,
+        scales,
+        quaternions,
+      ]
+    transforms:
+      - plas:
+          prune_by: opacities
+          scaling_fn: standardize
+          # activated: true
+          shuffle: true
+          improvement_break: 1e-4
+          # improvement_break: 0.1
+          to_field: sorted_indices
+          weights:
+            means_bytes_0: 0.2
+            means_bytes_1: 1.0
+            f_dc: 0.0
+            f_rest: 0.0
+            opacities: 0.0
+            scales: 0.0
+            quaternions: 0.0
+
+  - input_fields: [means_bytes_0, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: means_bytes_0
+          index_field: sorted_indices
+
+  - input_fields: [means_bytes_1, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: means_bytes_1
+          index_field: sorted_indices
+
+  - input_fields: [f_dc]
+    transforms:
+      - flatten:
+          start_dim: 1
+      - simple_quantize:
+          min: 0.0
+          max: 255.0
+          dim: 1
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [f_dc, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: f_dc
+          index_field: sorted_indices
+
+  - input_fields: [f_rest]
+    transforms:
+      - permute:
+          dims: [0, 2, 1]
+      - flatten:
+          start_dim: 1
+      - cluster:
+          method: kmeans
+          num_clusters: 65536
+          distance: euclidean
+          to_fields_with_prefix: f_rest_
+
+  - input_fields: [f_rest_labels, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: f_rest_labels
+          index_field: sorted_indices
+
+  - input_fields: [f_rest_labels]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 65535
+          dim: 2
+          dtype: uint16
+          round_to_int: true
+      - split_bytes:
+          to_fields_with_prefix: f_rest_labels_bytes_
+          num_bytes: 2
+
+  - input_fields: [f_rest_centroids]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 31
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [quaternions, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: quaternions
+          index_field: sorted_indices
+
+  - input_fields: [quaternions]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 63
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [scales, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: scales
+          index_field: sorted_indices
+
+  - input_fields: [scales]
+    transforms:
+      - remapping:
+          method: log
+      - simple_quantize:
+          min: 0
+          max: 63
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: opacities
+          index_field: sorted_indices
+
+  - input_fields: [opacities]
+    transforms:
+      - remapping:
+          method: inverse-sigmoid
+      - simple_quantize:
+          min: 0
+          max: 63
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields: [scales]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields:
+      from_fields_with_prefix: means_bytes_
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields: [quaternions]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields: [f_dc]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields: [f_rest_labels_bytes_0]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields: [f_rest_labels_bytes_1]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3
+
+  - input_fields: [f_rest_centroids]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: png
+          coding_params:
+            compression_level: 3

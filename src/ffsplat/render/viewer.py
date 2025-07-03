@@ -2,12 +2,8 @@
 
 
 import dataclasses
-import io
-import sys
 import time
-from collections import deque
 from collections.abc import Callable
-from pathlib import Path
 from threading import Lock
 from typing import Literal
 
@@ -17,14 +13,6 @@ import viser.transforms as vt
 from jaxtyping import Float32, UInt8
 
 from ._renderer import Renderer, RenderTask
-
-available_output_format: list[str] = [
-    "3DGS_INRIA_ply",
-    "3DGS_INRIA_nosh_ply",
-    "SOG-web",
-    "SOG-web-nosh",
-    "SOG-web-sh-split",
-]
 
 
 @dataclasses.dataclass
@@ -96,8 +84,6 @@ class Viewer:
         self.state = ViewerState()
         if self.mode == "rendering":
             self.state.status = "rendering"
-        self.convert_gui_handles: list = []
-        self.load_buttons: list = []
 
         # Private states.
         self._renderers: dict[int, Renderer] = {}
@@ -111,8 +97,6 @@ class Viewer:
         self._define_guis()
 
     def _define_guis(self):
-        self.server.gui.configure_theme(control_width="large", control_layout="fixed")
-        self.scene_label = self.server.gui.add_markdown("Showing scene: None")
         with self.server.gui.add_folder("Stats", visible=self.mode == "training") as self._stats_folder:
             self._stats_text_fn = (
                 lambda: f"""<sub>
@@ -141,119 +125,11 @@ class Viewer:
                 "Max Img Res", min=64, max=2048, step=1, initial_value=2048
             )
             self._max_img_res_slider.on_update(self.rerender)
+            # This is added to allow use of a lossless image format for rendering
             self.render_quality_dropdown = self.server.gui.add_dropdown(
                 "Render Format:", ["png", "jpeg"], initial_value="jpeg"
             )
             self.render_quality_dropdown.on_update(self.rerender)
-
-        # ------------------------------------------------------------------
-        # Stdout viewer - collapsible folder showing recent console output.
-        # ------------------------------------------------------------------
-        with self.server.gui.add_folder("Stdout Logs", expand_by_default=True) as self._stdout_folder:
-            # Use a <pre> block inside a scrollable container. Keep a
-            # reference so we can update it from the stdout redirector.
-            self._stdout_html = self.server.gui.add_html(
-                "<pre style='white-space:pre-wrap;font-family:monospace;margin:0;padding:8px;'></pre>"
-            )
-
-        # Hook Python stdout/stderr so new prints appear in the GUI.
-        # We keep the original streams so behaviour in the terminal is
-        # unchanged.
-        class _GuiStdout(io.TextIOBase):
-            """Wraps an underlying stream and mirrors the last few lines to a
-            viser HTML handle."""
-
-            def __init__(self, orig, html_handle):
-                self._orig = orig
-                self._html_handle = html_handle
-                self._buf: deque[str] = deque(maxlen=5)
-                # Access to GUI API for sending JS scroll command.
-                self._gui_api = html_handle._impl.gui_api  # type: ignore[attr-defined]
-
-            # Required TextIOBase overrides ---------------------------------
-            def write(self, text: str):  # type: ignore[override]
-                self._orig.write(text)
-
-                # If tqdm or similar writes carriage-return updates, update
-                # the last line instead of appending.
-                if "\r" in text and "\n" not in text:
-                    last = text.split("\r")[-1].rstrip()
-                    if self._buf:
-                        self._buf[-1] = last
-                    else:
-                        self._buf.append(last)
-                else:
-                    for part in text.split("\n"):
-                        if part == "":
-                            continue
-                        self._buf.append(part)
-
-                self._refresh_html()
-                return len(text)
-
-            def flush(self):  # type: ignore[override]
-                self._orig.flush()
-
-            # Internal ------------------------------------------------------
-            def _refresh_html(self):
-                content = (
-                    "<pre style='white-space:pre-wrap;font-family:monospace;margin:0;padding:8px;'>"
-                    + "\n".join(self._buf)
-                    + "</pre>"
-                )
-                self._html_handle.content = content
-
-        # Redirect once.
-        if not isinstance(sys.stdout, _GuiStdout):
-            gui_stream = _GuiStdout(sys.stdout, self._stdout_html)
-            sys.stdout = gui_stream  # type: ignore[assignment]
-            sys.stderr = gui_stream  # mirror stderr as well.
-        self.tab_group = self.server.gui.add_tab_group()
-
-    def add_scenes(self, results_path: Path):
-        self.scenes_tab = self.tab_group.add_tab("Scenes")
-        with self.scenes_tab:
-            if results_path is None:
-                results_path = Path("./results")
-            self.results_path_input = self.server.gui.add_text("store at:", results_path.as_posix())
-
-    def add_eval(self, eval_fn: Callable):
-        with self.tab_group.add_tab("Evaluation") as self.eval_tab:
-            self.eval_button = self.server.gui.add_button("Run evaluation")
-            self.eval_button.on_click(eval_fn)
-            self.eval_info = self.server.gui.add_markdown("")
-            self.eval_info.visible = False
-            self.eval_progress = self.server.gui.add_progress_bar(0.0)
-            self.eval_progress.visible = False
-            self.eval_table = self.server.gui.add_html("")
-
-    def add_convert(self, reset_dynamic_params_gui_fn: Callable, convert_fn: Callable):
-        with self.tab_group.add_tab("Convert") as self.convert_tab:
-            self._output_dropdown = self.server.gui.add_dropdown("Output format", available_output_format)
-            self._output_dropdown.on_update(reset_dynamic_params_gui_fn)
-            self._convert_button = self.server.gui.add_button("Convert")
-            self._convert_button.on_click(convert_fn)
-        reset_dynamic_params_gui_fn(None)
-
-    def add_to_scene_tab(
-        self, scene_id: int, description: str, load_fn: Callable, save_fn: Callable, save_params_fn: Callable
-    ):
-        with self.scenes_tab, self.server.gui.add_folder(f"Scene {scene_id}"):
-            self.server.gui.add_markdown(description)
-            load_button = self.server.gui.add_button("Load scene")
-            load_button.on_click(lambda _: load_fn(scene_id))
-            save_button = self.server.gui.add_button("Save scene")
-            save_button.on_click(lambda _: save_fn(scene_id))
-            save_button = self.server.gui.add_button("Save encoding parameters")
-            save_button.on_click(lambda _: save_params_fn(scene_id))
-            self.load_buttons.append(load_button)
-
-    def add_test_functionality(self, test_fn: Callable):
-        """This function is for development only. Adds a button to run a new function."""
-        with self.server.gui.add_folder("Test") as self.test_folder:
-            self._test_button = self.server.gui.add_button("Run test")
-            self._test_button.on_click(test_fn)
-            self._test_button.on_click(self.rerender)
 
     def _toggle_train_buttons(self, _):
         self._pause_train_button.visible = not self._pause_train_button.visible
@@ -281,7 +157,6 @@ class Viewer:
         client_id = client.client_id
         self._renderers[client_id] = Renderer(viewer=self, client=client, lock=self.lock)
         self._renderers[client_id].start()
-        client.camera.up_direction = np.array([0, -1, 0])
 
         @client.camera.on_update
         def _(_: viser.CameraHandle):

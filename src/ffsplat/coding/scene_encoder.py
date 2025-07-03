@@ -154,7 +154,10 @@ class SceneEncoder:
             input_fields_params = op_params["input_fields"]
             for transform_param in op_params["transforms"]:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
-                new_fields, decoding_updates = process_operation(op, verbose=verbose)
+                if op.transform_type != "write_file":
+                    new_fields, decoding_updates = process_operation(op, verbose=verbose)
+                else:
+                    new_fields, decoding_updates = op.apply(verbose=verbose)
                 #  if the coding_updates are not a copy the cache will be wrong
                 for decoding_update in copy.deepcopy(decoding_updates):
                     # if the last decoding update has the same input fields we can combine the transforms into one list
@@ -192,6 +195,8 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_nosh_ply.yaml"))
         case "SOG-web":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web.yaml"))
+        case "SOG-web-png":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-png.yaml"))
         case "SOG-web-nosh":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-nosh.yaml"))
         case "SOG-web-sh-split":

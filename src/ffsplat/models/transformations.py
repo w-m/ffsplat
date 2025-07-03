@@ -58,7 +58,11 @@ def convert_to_dtype(field_data: Tensor, dtype_str: str) -> Tensor:
 def write_image(output_file_path: Path, field_data: Tensor, file_type: str, coding_params: dict[str, Any]) -> None:
     match file_type:
         case "png":
-            cv2.imwrite(str(output_file_path), field_data.cpu().numpy())
+            cv2.imwrite(
+                str(output_file_path),
+                field_data.cpu().numpy(),
+                [cv2.IMWRITE_PNG_COMPRESSION, coding_params.get("compression_level", 3)],
+            )
         case "avif":
             # TODO: only do this once?
             register_avif_opener()
@@ -883,6 +887,7 @@ class WriteFile(Transformation):
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
         file_type = params.get("type")
+
         dynamic_params_config: list[dict[str, Any]] = []
 
         if file_type == "image":
@@ -892,16 +897,20 @@ class WriteFile(Transformation):
                 "values": ["avif", "png"],
                 "rebuild": True,
             })
+            # coding_params for image file
+            dynamic_coding_params: list[dict[str, Any]] = []
 
             match params["image_codec"]:
                 case "avif":
                     # check whether we need to update the coding params default:
                     coding_params: dict[str, Any] = params.get("coding_params", {})
-                    if len(coding_params) == 0:
+
+                    if not all(key in coding_params for key in ["quality", "chroma", "matrix_coefficients"]):
+                        coding_params.clear()
                         coding_params["quality"] = -1
                         coding_params["chroma"] = 444
                         coding_params["matrix_coefficients"] = 0
-                    dynamic_coding_params: list[dict[str, Any]] = []
+
                     dynamic_coding_params.append({
                         "label": "chroma",
                         "type": "dropdown",
@@ -937,10 +946,24 @@ class WriteFile(Transformation):
                     })
 
                 case "png":
-                    # For now png has empty coding_params
                     coding_params = params.get("coding_params", {})
-                    if len(coding_params) != 0:
+                    if "compression_level" not in coding_params:
                         coding_params.clear()
+                        coding_params["compression_level"] = 3
+                    dynamic_coding_params.append({
+                        "label": "compression",
+                        "set": "compression_level",
+                        "type": "number",
+                        "min": 0,
+                        "max": 9,
+                        "step": 1,
+                        "dtype": int,
+                    })
+                    dynamic_params_config.append({
+                        "label": "coding_params",
+                        "type": "heading",
+                        "params": dynamic_coding_params,
+                    })
 
                 case _:
                     raise ValueError(f"unknown image codec: {params["image_codec"]}")
