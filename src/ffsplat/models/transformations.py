@@ -202,7 +202,7 @@ class Cluster(Transformation):
         dynamic_params_config.append({
             "label": "distance",
             "type": "dropdown",
-            "values": ["euclidean", "cosine", "manhatten"],
+            "values": ["euclidean", "cosine", "manhattan"],
         })
 
         return dynamic_params_config
@@ -229,7 +229,7 @@ class Split(Transformation):
                 "to_field_list": to_field_list,
             }:
                 chunks = field_data.split(split_size_or_sections, dim)
-                for target_field_name, chunk in zip(to_field_list, chunks):
+                for target_field_name, chunk in zip(to_field_list, chunks, strict=False):
                     if target_field_name == "_":
                         continue
                     if squeeze:
@@ -292,20 +292,6 @@ class Remapping(Transformation):
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
         match params:
-            case {"method": "scale-sqrt2"}:
-                scale = torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
-                field_data = field_data * scale
-                decoding_update.append({
-                    "input_fields": [field_name],
-                    "transforms": [{"remapping": {"method": "scale-inverse-sqrt2"}}],
-                })
-            case {"method": "scale-inverse-sqrt2"}:
-                scale = 1.0 / torch.sqrt(torch.tensor(2.0, dtype=field_data.dtype, device=field_data.device))
-                field_data = field_data * scale
-                decoding_update.append({
-                    "input_fields": [field_name],
-                    "transforms": [{"remapping": {"method": "scale-sqrt2"}}],
-                })
             case {"method": "exp"}:
                 field_data = torch.exp(field_data)
             case {"method": "sigmoid"}:
@@ -390,9 +376,6 @@ class Remapping(Transformation):
                 normalized = normalized * (max_val_f - min_val_f) + min_val_f
 
                 field_data = normalized
-
-            case {"method": "canvas", "min": min_val, "max": max_val}:
-                field_data = field_data.clamp(min=min_val, max=max_val)
             case _:
                 raise ValueError(f"Unknown remapping parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
@@ -430,35 +413,19 @@ class Reparametrize(Transformation):
                 field_data = field_data / torch.linalg.norm(field_data, dim=dim, keepdim=True)
 
                 sign_mask = field_data.select(dim, 3) < 0
-                # sign_mask = field_data.select(dim, 0) < 0
                 field_data[sign_mask] *= -1
                 new_fields[field_name] = Field(field_data, parentOp)
 
-            case {"method": "pack_dynamic", "to_fields_with_prefix": to_fields_with_prefix, "dim": dim}:
-                abs_field_data = field_data.abs()
-                max_idx = abs_field_data.argmax(dim=dim)
-
-                # ensure largest component is positive
-                max_vals = field_data.gather(-1, max_idx.unsqueeze(-1)).squeeze(-1)
-                sign = max_vals.sign()
+            case {"method": "pack_quaternions", "to_fields_with_prefix": to_fields_with_prefix, "dim": dim}:
+                # Ensure the first component is positive
+                sign = field_data.select(dim, 0).sign()
                 sign[sign == 0] = 1
                 q_signed = field_data * sign.unsqueeze(-1)
 
-                # build variants dropping each component
-                variants = []
-                for i in range(4):
-                    dims = list(range(4))
-                    dims.remove(i)
-                    variants.append(q_signed[..., dims])  # (...,3)
-                stacked = torch.stack(variants, dim=-2)  # (...,4,3)
+                # Drop the first component (is always the largest)
+                values = q_signed.narrow(dim, 1, 3)
+                max_idx = torch.zeros_like(sign, dtype=values.dtype).unsqueeze(-1)
 
-                # select the appropriate 3-vector based on max_idx
-                idx_exp = max_idx.unsqueeze(-1).unsqueeze(-1).expand(*max_idx.shape, 1, 3)
-                values = torch.gather(stacked, dim=-2, index=idx_exp).squeeze(-2)  # (...,3)
-
-                max_idx = max_idx.to(values.dtype).unsqueeze(-1)
-
-                # Apply brightness increase by multiplying by sqrt(2)
                 new_fields[f"{to_fields_with_prefix}indices"] = Field(max_idx, parentOp)
                 new_fields[f"{to_fields_with_prefix}values"] = Field(values, parentOp)
                 decoding_update.append({
@@ -466,7 +433,7 @@ class Reparametrize(Transformation):
                     "transforms": [
                         {
                             "reparametize": {
-                                "method": "unpack_dynamic",
+                                "method": "unpack_quaternions",
                                 "from_fields_with_prefix": to_fields_with_prefix,
                                 "dim": -1,
                                 "to_field_name": field_name,
@@ -476,14 +443,11 @@ class Reparametrize(Transformation):
                 })
 
             case {
-                "method": "unpack_dynamic",
+                "method": "unpack_quaternions",
                 "from_fields_with_prefix": from_fields_with_prefix,
                 "dim": dim,
                 "to_field_name": to_field_name,
             }:
-                # Retrieve the indices and values fields
-                # indices_field = input_fields[f"{from_fields_with_prefix}indices"].data
-                # Debug: check if indices_field contains anything else than the number 3
                 values_field = input_fields[f"{from_fields_with_prefix}values"].data
 
                 if values_field is None:
@@ -491,18 +455,16 @@ class Reparametrize(Transformation):
                 if values_field.shape[dim] != 3:
                     raise ValueError(f"Field data shape mismatch for unit sphere recovery: {field_data.shape}")
 
-                # indices_field = indices_field.round().to(torch.int64).squeeze(-1) # indices_field is useless, all are 3
                 partial_norm_sq = (values_field**2).sum(dim=dim, keepdim=True)
                 # Recover the missing component (always non-negative)
                 w = torch.sqrt(torch.clamp(1.0 - partial_norm_sq, min=0.0))
 
-                # Create a tensor to hold the reconstructed data
                 num_components = values_field.shape[-1] + 1  # Original data had one more component
                 reconstructed = torch.zeros(
                     *values_field.shape[:-1], num_components, dtype=values_field.dtype, device=values_field.device
                 )
 
-                # For wxyz convention
+                # wxyz convention
                 reconstructed[..., 0] = w.squeeze(-1)
                 reconstructed[..., 1:] = values_field
 
@@ -778,22 +740,28 @@ class Sort(Transformation):
         sorted_indices = None
         if field_data is None:
             raise ValueError("Field data is None before sorting")
+        prefix = params["to_fields_with_prefix"]
         match params:
             case {"method": "lexicographic"}:
                 sorted_indices = np.lexsort(field_data.permute(dims=(1, 0)).cpu().numpy())
                 sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
-            case {"method": "argsort"}:
-                sorted_indices = torch.argsort(field_data)
+                inverse_sorted_indices = torch.argsort(sorted_indices)
+                # square_keep_indices = PLAS.primitive_filter_pruning_to_square_shape(inverse_sorted_indices, verbose=False)
+                # inverse_sorted_indices = inverse_sorted_indices[square_keep_indices]
             case {"method": "plas"}:
-                plas_cfg = {k: v for k, v in params.items() if k != "method"}
+                plas_cfg = {k: v for k, v in params.items() if k not in ["method", "to_fields_with_prefix"]}
+                plas_cfg["to_field"] = f"{prefix}indices"
                 sorted_indices = PLAS.plas_preprocess(
                     plas_cfg=PLASConfig(**plas_cfg),
                     fields=parentOp.input_fields,
                     verbose=verbose,
                 )
+                inverse_sorted_indices = torch.argsort(sorted_indices)
+
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
-        new_fields[params["to_field"]] = Field(sorted_indices, parentOp)
+        new_fields[f"{prefix}indices"] = Field(sorted_indices, parentOp)
+        new_fields[f"{prefix}indices_inverse"] = Field(inverse_sorted_indices, parentOp)
 
         return new_fields, decoding_update
 
@@ -1098,7 +1066,7 @@ class WriteFile(Transformation):
                         transforms_str = [next(iter(t_str_braced.keys())) for t_str_braced in op["transforms"]]
                         transform_types = [transformation_map[transform] for transform in transforms_str]
                         input_field = op["input_fields"][0] if len(op["input_fields"]) > 0 else ""
-                        for idx, (t_str, t) in enumerate(zip(transforms_str, transform_types)):
+                        for idx, (t_str, t) in enumerate(zip(transforms_str, transform_types, strict=False)):
                             if t is ReadFile:
                                 field_name_read = op["transforms"][idx][t_str].get("field_name")
                                 if field_name_read.startswith(field_name):
@@ -1113,24 +1081,12 @@ class WriteFile(Transformation):
                                 meta[field_name]["mins"] = op["transforms"][idx][t_str]["min_values"]
                                 meta[field_name]["maxs"] = op["transforms"][idx][t_str]["max_values"]
                             elif t is Reparametrize:
-                                if op["transforms"][idx][t_str].get("method") == "unpack_dynamic":
+                                if op["transforms"][idx][t_str].get("method") == "unpack_quaternions":
                                     to_field_name = op["transforms"][idx][t_str].get("to_field_name")
                                     if to_field_name == field_name:
                                         meta[to_field_name]["encoding"] = "quaternion_packed"
 
-                    # inconsitencies in sogs, that are hardcoded:
-                    if field_name == "quats":
-                        if "mins" in meta[field_name]:
-                            del meta[field_name]["mins"]
-                        if "maxs" in meta[field_name]:
-                            del meta[field_name]["maxs"]
-                        meta[field_name]["dtype"] = "uint8"  # is also hardcoded in sogs
-                    if field_name == "shN":
-                        # because is 8 by default and it's the only parameter requiring encoding parameters of more than one step back
-                        meta[field_name]["quantization"] = 8
-
                 write_json(output_file_path, meta)
-
             case _:
                 raise ValueError(f"Unknown WriteFile parameters: {params}")
 
@@ -1147,12 +1103,14 @@ class WriteFile(Transformation):
             dynamic_params_config.append({
                 "label": "image_codec",
                 "type": "dropdown",
-                "values": ["avif", "png"],
+                "values": ["avif", "png", "webp"],
                 "rebuild": True,
             })
             # coding_params for image file
             dynamic_coding_params: list[dict[str, Any]] = []
 
+            dynamic_coding_params: list[dict[str, Any]] = []
+            coding_params: dict[str, Any] = params.get("coding_params", {})
             match params["image_codec"]:
                 case "avif":
                     # check whether we need to update the coding params default:
@@ -1211,6 +1169,46 @@ class WriteFile(Transformation):
                         "max": 9,
                         "step": 1,
                         "dtype": int,
+                    })
+                    dynamic_params_config.append({
+                        "label": "coding_params",
+                        "type": "heading",
+                        "params": dynamic_coding_params,
+                    })
+                case "webp":
+                    if not all(key in coding_params for key in ["quality", "method", "exact", "lossless"]):
+                        coding_params.clear()
+                        coding_params["quality"] = 100
+                        coding_params["method"] = 6
+                        coding_params["exact"] = True
+                        coding_params["lossless"] = True
+                    dynamic_coding_params.append({
+                        "label": "exact",
+                        "type": "bool",
+                        "values": ["True", "False"],
+                    })
+                    dynamic_coding_params.append({
+                        "label": "lossless",
+                        "type": "bool",
+                        "values": ["True", "False"],
+                    })
+                    # filesize-speed tradeoff when lossless
+                    dynamic_coding_params.append({
+                        "label": "quality",
+                        "type": "number",
+                        "min": 0,
+                        "max": 100,
+                        "step": 1,
+                        "dtype": int,
+                    })
+                    # also filesize-speed tradeoff, all compatible with lossless
+                    dynamic_coding_params.append({
+                        "label": "method",
+                        "type": "number",
+                        "dtype": int,
+                        "min": 0,
+                        "max": 6,
+                        "step": 1,
                     })
                     dynamic_params_config.append({
                         "label": "coding_params",
