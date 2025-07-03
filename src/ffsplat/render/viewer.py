@@ -24,6 +24,7 @@ available_output_format: list[str] = [
     "SOG-web",
     "SOG-web-nosh",
     "SOG-web-sh-split",
+    "SOG-canvas",
 ]
 
 
