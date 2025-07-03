@@ -166,7 +166,7 @@ class SceneEncoder:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
                 new_fields, decoding_updates = process_operation(
                     op, verbose=verbose, decoding_ops=self.decoding_params.to_yaml()
-                )  # , decoding_ops=self.decoding_params.ops)
+                )
                 #  if the coding_updates are not a copy the cache will be wrong
                 for decoding_update in copy.deepcopy(decoding_updates):
                     # if the last decoding update has the same input fields we can combine the transforms into one list

@@ -14,7 +14,7 @@ ops:
   - input_fields: [sh]
     transforms:
       - split:
-          to_field_list: [sh0, shN] #in sogs f_dc=sh0, frest=shN
+          to_field_list: [sh0, shN]
           split_size_or_sections: [1, 15]
           dim: 1
           squeeze: false
@@ -45,16 +45,15 @@ ops:
     transforms:
       - sort:
           method: plas
-          prune_by: opacities # in sogs pruned by 0.5 of number gaussians instead
-          scaling_fn: none #standardize
-          # activated: true
+          prune_by: opacities
+          scaling_fn: none
           shuffle: true
           improvement_break: 1e-4
-          to_field: sorted_indices
+          to_fields_with_prefix: sorted_
           weights:
             means: 1.0
             sh0: 1.0
-            shN: 0.0 #shN not in sortkeys
+            shN: 0.0
             opacities: 0.0
             scales: 1.0
             quaternions: 1.0
@@ -124,34 +123,34 @@ ops:
   - input_fields: [quats]
     transforms:
       - reparametize:
-          method: pack_dynamic
-          to_fields_with_prefix: quaternions_packed_
+          method: pack_quaternions
+          to_fields_with_prefix: quats_packed_
           dim: -1
 
-  - input_fields: [quaternions_packed_values]
+  - input_fields: [quats_packed_indices]
     transforms:
-      - remapping:
-          method: scale-sqrt2
-      - remapping:
-          method: "minmax"
+      - simple_quantize:
+          min: 252
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [quats_packed_values]
+    transforms:
+      - simple_quantize:
           min: 0
           max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
 
-  - input_fields: [quaternions_packed_values, quaternions_packed_indices]
+  - input_fields: [quats_packed_values, quats_packed_indices]
     transforms:
       - combine:
           method: concat
           dim: 2
           to_field: quats
-
-  - input_fields: [quats]
-    transforms:
-      - simple_quantize:
-          min_values: [0, 0, 0, 252]
-          max_values: [255, 255, 255, 255]
-          dim: 2
-          dtype: uint8
-          round_to_int: true
 
   - input_fields: [sh0, sorted_indices]
     transforms:
@@ -203,7 +202,7 @@ ops:
           end_dim: 1
       - cluster:
           method: kmeans
-          num_clusters: 65536 #is dynamic in sogs
+          num_clusters: 65536
           distance: manhattan
           to_fields_with_prefix: shN_
 
@@ -220,7 +219,7 @@ ops:
     transforms:
       - sort:
           method: lexicographic
-          to_field: shN_centroids_indices
+          to_fields_with_prefix: shN_centroids_
 
   - input_fields: [shN_centroids, shN_centroids_indices]
     transforms:
@@ -233,20 +232,13 @@ ops:
       - reshape:
           shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3) =
 
-  - input_fields: [shN_centroids_indices]
-    transforms:
-      - sort:
-          method: argsort
-          to_field: shN_centroids_indices_sorted_inverse
-
-  - input_fields: [shN_labels, shN_centroids_indices_sorted_inverse]
+  - input_fields: [shN_labels, shN_centroids_indices_inverse] #labels are indices, centroids_inverse_indices are original location, match original location with
     transforms:
       - reindex:
-          src_field: shN_centroids_indices_sorted_inverse
+          src_field: shN_centroids_indices_inverse
           index_field: shN_labels
 
-  #bug here:
-  - input_fields: [shN_centroids_indices_sorted_inverse]
+  - input_fields: [shN_centroids_indices_inverse]
     transforms:
       - to_field:
           to_field_name: shN_labels
@@ -272,7 +264,6 @@ ops:
           dim: 2
           to_field: shN_labels
 
-  #img file outputs
   - input_fields: [means_l]
     transforms:
       - write_file:
@@ -306,7 +297,7 @@ ops:
             method: 6
             exact: true
 
-  - input_fields: [quats] #rgba
+  - input_fields: [quats]
     transforms:
       - write_file:
           type: image
@@ -328,7 +319,7 @@ ops:
             method: 6
             exact: true
 
-  - input_fields: [shN_centroids] #rgb
+  - input_fields: [shN_centroids]
     transforms:
       - write_file:
           type: image
@@ -339,7 +330,7 @@ ops:
             method: 6
             exact: true
 
-  - input_fields: [shN_labels] #rgb , result is suprisingly less noisy than in sogs
+  - input_fields: [shN_labels]
     transforms:
       - write_file:
           type: image
