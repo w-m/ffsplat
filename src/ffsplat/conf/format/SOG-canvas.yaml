@@ -215,10 +215,12 @@ ops:
           dtype: uint8
           round_to_int: true
 
-  - input_fields: [shN_centroids]
+  - input_fields: [shN_centroids, shN_labels]
     transforms:
       - sort:
           method: lexicographic
+          labels: shN_labels
+          target: shN_centroids
           to_fields_with_prefix: shN_centroids_
 
   - input_fields: [shN_centroids, shN_centroids_indices]
@@ -232,21 +234,8 @@ ops:
       - reshape:
           shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3) =
 
-  - input_fields: [shN_labels, shN_centroids_indices_inverse] #labels are indices, centroids_inverse_indices are original location, match original location with
-    transforms:
-      - reindex:
-          src_field: shN_centroids_indices_inverse
-          index_field: shN_labels
-
-  - input_fields: [shN_centroids_indices_inverse]
-    transforms:
-      - to_field:
-          to_field_name: shN_labels
-
   - input_fields: [shN_labels]
     transforms:
-      - reshape:
-          shape: [588, 588] #n_sidelen
       - simple_quantize:
           min: 0
           max: 65535

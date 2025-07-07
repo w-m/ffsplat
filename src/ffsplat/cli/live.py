@@ -397,17 +397,24 @@ class InteractiveConversionTool:
         self.enable_convert_ui()
         self.enable_load_buttons()
 
-    def _build_transform_folder(self, transform_folder, description, transformation, transform_type):
+    def _build_transform_folder(self, transform_folder, operation, transformation, transform_type):
         # clear transform folder for rebuild
         for child in tuple(transform_folder._children.values()):
             child.remove()
-        dynamic_params_conf = get_dynamic_params(transformation)
+
+        if isinstance(operation["input_fields"], list):
+            input_field = operation["input_fields"]
+            description = f"input fields: {input_field}"
+        else:
+            input_field = operation["input_fields"]["from_fields_with_prefix"]
+            description = f"input fields from prefix: {input_field}"
+        dynamic_params_conf = get_dynamic_params(transformation, input_field)
         initial_values = transformation[transform_type]
 
         with transform_folder:
             self.viewer.server.gui.add_markdown(description)
             rebuild_fn = partial(
-                self._build_transform_folder, transform_folder, description, transformation, transform_type
+                self._build_transform_folder, transform_folder, operation, transformation, transform_type
             )
             self._build_options_for_transformation(dynamic_params_conf, initial_values, rebuild_fn)
 
@@ -503,20 +510,14 @@ class InteractiveConversionTool:
                 for transformation in operation["transforms"]:
                     # get list with customizable options
 
-                    dynamic_transform_conf = get_dynamic_params(transformation)
+                    dynamic_transform_conf = get_dynamic_params(transformation, operation["input_fields"])
                     if len(dynamic_transform_conf) == 0:
                         continue
                     transform_type = next(iter(transformation.keys()))
                     transform_folder = self.viewer.server.gui.add_folder(transform_type)
                     self.viewer.convert_gui_handles.append(transform_folder)
-                    if isinstance(operation["input_fields"], list):
-                        description = f"input fields: {operation["input_fields"]}"
-                    else:
-                        description = (
-                            f"input fields from prefix: {operation["input_fields"]["from_fields_with_prefix"]}"
-                        )
 
-                    self._build_transform_folder(transform_folder, description, transformation, transform_type)
+                    self._build_transform_folder(transform_folder, operation, transformation, transform_type)
 
     @torch.no_grad()
     def render_fn(

@@ -389,8 +389,27 @@ class Remapping(Transformation):
         dynamic_params_config.append({
             "label": "method",
             "type": "dropdown",
-            "values": ["log", "signed-log", "inverse-sigmoid"],
+            "values": ["log", "signed-log", "inverse-sigmoid", "minmax"],
         })
+        if params.get("method") == "minmax":
+            dynamic_params_config.append({
+                "label": "min",
+                "type": "number",
+                "min": 0,
+                "max": 4294967295,  # unit32 max
+                "step": 1,
+                "dtype": int,
+                "set": "min",
+            })
+            dynamic_params_config.append({
+                "label": "max",
+                "type": "number",
+                "min": 0,
+                "max": 4294967295,  # unit32 max
+                "step": 1,
+                "dtype": int,
+                "set": "max",
+            })
         return dynamic_params_config
 
 
@@ -707,7 +726,10 @@ class Reindex(Transformation):
         decoding_update: list[dict[str, Any]] = []
         # TODO: make this compatible with 1D-tensors
         match params:
-            case {"src_field": src_field_name, "index_field": index_field_name}:
+            case {
+                "src_field": src_field_name,
+                "index_field": index_field_name,
+            }:
                 index_field_obj = input_fields[index_field_name]
                 original_data = input_fields[src_field_name].data
                 new_fields[src_field_name] = Field(original_data[index_field_obj.data], parentOp)
@@ -742,12 +764,22 @@ class Sort(Transformation):
             raise ValueError("Field data is None before sorting")
         prefix = params["to_fields_with_prefix"]
         match params:
-            case {"method": "lexicographic"}:
-                sorted_indices = np.lexsort(field_data.permute(dims=(1, 0)).cpu().numpy())
+            case {"method": "lexicographic", "labels": labels_name, "target": target_name}:
+                target = input_fields[target_name].data
+                sorted_indices = np.lexsort(target.permute(dims=(1, 0)).cpu().numpy())
                 sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
                 inverse_sorted_indices = torch.argsort(sorted_indices)
-                # square_keep_indices = PLAS.primitive_filter_pruning_to_square_shape(inverse_sorted_indices, verbose=False)
-                # inverse_sorted_indices = inverse_sorted_indices[square_keep_indices]
+
+                if labels_name != "_":
+                    original_labels = input_fields[labels_name].data
+                    # orignal_labels_grid = PLAS.primitive_filter_pruning_to_square_shape(original_labels,verbose=verbose)
+                    original_labels_grid = PLAS.as_grid_img(original_labels)
+                    updated_labels = inverse_sorted_indices[original_labels_grid]
+                    new_fields[labels_name] = Field(updated_labels, parentOp)
+                    decoding_update.append({
+                        "input_fields": [labels_name],
+                        "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
+                    })
             case {"method": "plas"}:
                 plas_cfg = {k: v for k, v in params.items() if k not in ["method", "to_fields_with_prefix"]}
                 plas_cfg["to_field"] = f"{prefix}indices"
@@ -764,6 +796,20 @@ class Sort(Transformation):
         new_fields[f"{prefix}indices_inverse"] = Field(inverse_sorted_indices, parentOp)
 
         return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "method",
+            "type": "dropdown",
+            "values": ["lexicographic", "plas"],
+        })
+        if params.get("method") == "plas":
+            dynamic_params_config.extend(PLAS.get_dynamic_params(params))
+
+        return dynamic_params_config
 
 
 class PLAS:
@@ -858,12 +904,20 @@ class PLAS:
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
 
-        if params.get("weights") is None:
-            raise ValueError(f"PLAS parameters is missing weights: {params}")
+        # if params.get("weights") is None:
+        # raise ValueError(f"PLAS parameters is missing weights: {params}")
         field_names = list(params["weights"].keys())
         scaling_functions = ["standardize", "minmax", "none"]
 
         dynamic_params_config: list[dict[str, Any]] = []
+
+        params.setdefault("scaling_fn", "standardize")
+        params.setdefault("shuffle", True)
+        params.setdefault("improvement_break", 1e-4)
+        # coding_params.setdefault("quality", -1)
+        # coding_params.setdefault("chroma", 444)
+        # coding_params.setdefault("matrix_coefficients", 0)
+        # TODO: initial values for scaling function, improvement break!!!!
         dynamic_params_config.append({
             "label": "scaling_fn",
             "type": "dropdown",
@@ -885,6 +939,8 @@ class PLAS:
         })
 
         weight_config: list[dict[str, Any]] = []
+        # if params.get("weights") is None:
+        # params.
         for field_name in field_names:
             weight_config.append({
                 "label": field_name,
@@ -1428,10 +1484,17 @@ def apply_transform(
         return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose=verbose)
 
 
-def get_dynamic_params(params: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def get_dynamic_params(params: dict[str, dict[str, Any]], input_field: list | str) -> list[dict[str, Any]]:
     """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
     transform_type = next(iter(params.keys()))
     transformation = transformation_map.get(transform_type)
     if transformation is None:
         raise ValueError(f"Unknown transformation: {transform_type}")
+    elif (
+        transformation is Sort
+        and params[transform_type]["method"] == "plas"
+        and "weights" not in params[transform_type]
+    ):
+        params[transform_type]["weights"] = {k: 1.0 for k in input_field}
+
     return transformation.get_dynamic_params(params[transform_type])
