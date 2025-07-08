@@ -792,6 +792,7 @@ class Sort(Transformation):
 
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
+        # TODO: optional label-update
         new_fields[f"{prefix}indices"] = Field(sorted_indices, parentOp)
         new_fields[f"{prefix}indices_inverse"] = Field(inverse_sorted_indices, parentOp)
 
@@ -1109,7 +1110,10 @@ class WriteFile(Transformation):
                 file_path = "meta.json"
                 output_file_path = Path(base_path) / Path(file_path)
                 field_names = list(parentOp.input_fields.keys())
-                meta: dict[str, Any] = {}
+                meta: dict[str, Any] = {
+                    "packer": "ffsplat",
+                    "version": 1,
+                }
                 # Readfile no input_fields
                 for field_name in field_names:
                     field = parentOp.input_fields[field_name]
