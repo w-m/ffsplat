@@ -840,7 +840,7 @@ class PLAS:
                 f"Removing {num_to_remove}/{num_primitives} primitives to fit the grid. ({100 * num_to_remove / num_primitives:.4f}%)"
             )
 
-        _, keep_indices = torch.topk(data, k=grid_sidelen * grid_sidelen)
+        _, keep_indices = torch.topk(data.squeeze(), k=grid_sidelen * grid_sidelen)
         sorted_keep_indices = torch.sort(keep_indices)[0]
         return sorted_keep_indices
 
@@ -1081,6 +1081,8 @@ class WriteFile(Transformation):
             case {"type": "image", "image_codec": codec, "coding_params": coding_params, "base_path": base_path}:
                 for field_name, field_obj in parentOp.input_fields.items():
                     field_data = field_obj.data
+                    if field_data.shape[-1] == 1:
+                        field_data = field_data.squeeze(-1)
                     file_path = f"{field_name}.{codec}"
                     output_file_path = Path(base_path) / Path(file_path)
                     write_image(

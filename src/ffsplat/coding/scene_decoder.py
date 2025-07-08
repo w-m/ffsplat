@@ -81,11 +81,12 @@ class SceneDecoder:
     def _create_scene(self) -> None:
         match self.decoding_params.scene.get("primitives"):
             case "3DGS-INRIA":
+                opacities_field = self.fields["opacities"]
                 self.scene = Gaussians(
                     means=self.fields["means"],
                     quaternions=self.fields["quaternions"],
                     scales=self.fields["scales"],
-                    opacities=self.fields["opacities"],
+                    opacities=Field(opacities_field.data.unsqueeze(-1), opacities_field.op),
                     sh=self.fields["sh"],
                 )
             case _:

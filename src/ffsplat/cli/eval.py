@@ -37,7 +37,7 @@ def rasterize_splats(
         means=gaussians.means.data,
         quats=gaussians.quaternions.data,
         scales=gaussians.scales.data,
-        opacities=gaussians.opacities.data,
+        opacities=gaussians.opacities.data.squeeze(),
         colors=colors,
         viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
         Ks=Ks,  # [C, 3, 3]

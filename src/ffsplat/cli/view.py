@@ -35,7 +35,7 @@ def render_fn(
         means_t,  # [N, 3]
         quats_t,  # [N, 4]
         scales_t,  # [N, 3]
-        opacities_t,  # [N]
+        opacities_t.squeeze(),  # [N]
         colors,  # [N, S, 3]
         viewmat[None],  # [1, 4, 4]
         K[None],  # [1, 3, 3]

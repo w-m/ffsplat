@@ -164,12 +164,6 @@ ops:
           src_field: shN
           index_field: sorted_indices
 
-  - input_fields: [opacities]
-    transforms:
-      - reshape:
-          start_dim: 2
-          shape: [1]
-
   - input_fields: [sh0]
     transforms:
       - permute:
