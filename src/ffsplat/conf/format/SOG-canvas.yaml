@@ -49,7 +49,7 @@ ops:
           scaling_fn: none
           shuffle: true
           improvement_break: 1e-4
-          to_fields_with_prefix: sorted_
+          to_field: sorted_indices
           weights:
             means: 1.0
             sh0: 1.0
@@ -215,7 +215,7 @@ ops:
           method: lexicographic
           labels: shN_labels
           target: shN_centroids
-          to_fields_with_prefix: shN_centroids_
+          to_field: shN_centroids_indices
 
   - input_fields: [shN_centroids, shN_centroids_indices]
     transforms:

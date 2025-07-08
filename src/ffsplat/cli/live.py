@@ -42,6 +42,7 @@ available_output_format: list[str] = [
     "SOG-web-png",
     "SOG-web-nosh",
     "SOG-web-sh-split",
+    "SOG-canvas",
 ]
 
 

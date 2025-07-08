@@ -389,27 +389,8 @@ class Remapping(Transformation):
         dynamic_params_config.append({
             "label": "method",
             "type": "dropdown",
-            "values": ["log", "signed-log", "inverse-sigmoid", "minmax"],
+            "values": ["log", "signed-log", "inverse-sigmoid"],
         })
-        if params.get("method") == "minmax":
-            dynamic_params_config.append({
-                "label": "min",
-                "type": "number",
-                "min": 0,
-                "max": 4294967295,  # unit32 max
-                "step": 1,
-                "dtype": int,
-                "set": "min",
-            })
-            dynamic_params_config.append({
-                "label": "max",
-                "type": "number",
-                "min": 0,
-                "max": 4294967295,  # unit32 max
-                "step": 1,
-                "dtype": int,
-                "set": "max",
-            })
         return dynamic_params_config
 
 
@@ -726,10 +707,7 @@ class Reindex(Transformation):
         decoding_update: list[dict[str, Any]] = []
         # TODO: make this compatible with 1D-tensors
         match params:
-            case {
-                "src_field": src_field_name,
-                "index_field": index_field_name,
-            }:
+            case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
                 original_data = input_fields[src_field_name].data
                 new_fields[src_field_name] = Field(original_data[index_field_obj.data], parentOp)
@@ -762,17 +740,20 @@ class Sort(Transformation):
         sorted_indices = None
         if field_data is None:
             raise ValueError("Field data is None before sorting")
-        prefix = params["to_fields_with_prefix"]
+        to_field_name = params["to_field"]
         match params:
-            case {"method": "lexicographic", "labels": labels_name, "target": target_name}:
+            case {"method": "lexicographic", "target": target_name}:
+                # plas preprocess, use weights 1 instead of target_name
+                plas_cfg = {k: v for k, v in params.items() if k not in ["method", "labels"]}
+
                 target = input_fields[target_name].data
                 sorted_indices = np.lexsort(target.permute(dims=(1, 0)).cpu().numpy())
                 sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
-                inverse_sorted_indices = torch.argsort(sorted_indices)
 
-                if labels_name != "_":
+                if "labels" in params:
+                    inverse_sorted_indices = torch.argsort(sorted_indices)
+                    labels_name = params["labels"]
                     original_labels = input_fields[labels_name].data
-                    # orignal_labels_grid = PLAS.primitive_filter_pruning_to_square_shape(original_labels,verbose=verbose)
                     original_labels_grid = PLAS.as_grid_img(original_labels)
                     updated_labels = inverse_sorted_indices[original_labels_grid]
                     new_fields[labels_name] = Field(updated_labels, parentOp)
@@ -780,21 +761,22 @@ class Sort(Transformation):
                         "input_fields": [labels_name],
                         "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
                     })
+
             case {"method": "plas"}:
-                plas_cfg = {k: v for k, v in params.items() if k not in ["method", "to_fields_with_prefix"]}
-                plas_cfg["to_field"] = f"{prefix}indices"
+                plas_cfg = {k: v for k, v in params.items() if k not in ["method"]}
+
+                plas_cfg["to_field"] = params["to_field"]
                 sorted_indices = PLAS.plas_preprocess(
                     plas_cfg=PLASConfig(**plas_cfg),
                     fields=parentOp.input_fields,
                     verbose=verbose,
                 )
-                inverse_sorted_indices = torch.argsort(sorted_indices)
 
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
+
         # TODO: optional label-update
-        new_fields[f"{prefix}indices"] = Field(sorted_indices, parentOp)
-        new_fields[f"{prefix}indices_inverse"] = Field(inverse_sorted_indices, parentOp)
+        new_fields[to_field_name] = Field(sorted_indices, parentOp)
 
         return new_fields, decoding_update
 
@@ -905,8 +887,6 @@ class PLAS:
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
 
-        # if params.get("weights") is None:
-        # raise ValueError(f"PLAS parameters is missing weights: {params}")
         field_names = list(params["weights"].keys())
         scaling_functions = ["standardize", "minmax", "none"]
 
@@ -915,10 +895,6 @@ class PLAS:
         params.setdefault("scaling_fn", "standardize")
         params.setdefault("shuffle", True)
         params.setdefault("improvement_break", 1e-4)
-        # coding_params.setdefault("quality", -1)
-        # coding_params.setdefault("chroma", 444)
-        # coding_params.setdefault("matrix_coefficients", 0)
-        # TODO: initial values for scaling function, improvement break!!!!
         dynamic_params_config.append({
             "label": "scaling_fn",
             "type": "dropdown",
@@ -940,8 +916,6 @@ class PLAS:
         })
 
         weight_config: list[dict[str, Any]] = []
-        # if params.get("weights") is None:
-        # params.
         for field_name in field_names:
             weight_config.append({
                 "label": field_name,
@@ -1170,14 +1144,10 @@ class WriteFile(Transformation):
             })
             # coding_params for image file
             dynamic_coding_params: list[dict[str, Any]] = []
-
-            dynamic_coding_params: list[dict[str, Any]] = []
             coding_params: dict[str, Any] = params.get("coding_params", {})
             match params["image_codec"]:
                 case "avif":
                     # check whether we need to update the coding params default:
-                    coding_params: dict[str, Any] = params.get("coding_params", {})
-
                     if not all(key in coding_params for key in ["quality", "chroma", "matrix_coefficients"]):
                         coding_params.clear()
                         coding_params["quality"] = -1
@@ -1219,7 +1189,6 @@ class WriteFile(Transformation):
                     })
 
                 case "png":
-                    coding_params = params.get("coding_params", {})
                     if "compression_level" not in coding_params:
                         coding_params.clear()
                         coding_params["compression_level"] = 3
