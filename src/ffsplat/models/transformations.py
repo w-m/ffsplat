@@ -705,7 +705,6 @@ class Reindex(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
-        # TODO: make this compatible with 1D-tensors
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
@@ -742,12 +741,20 @@ class Sort(Transformation):
             raise ValueError("Field data is None before sorting")
         to_field_name = params["to_field"]
         match params:
-            case {"method": "lexicographic", "target": target_name}:
-                # plas preprocess, use weights 1 instead of target_name
+            case {"method": "lexicographic"}:
+                # weight is effectively a boolean in this case
                 plas_cfg = {k: v for k, v in params.items() if k not in ["method", "labels"]}
-
-                target = input_fields[target_name].data
-                sorted_indices = np.lexsort(target.permute(dims=(1, 0)).cpu().numpy())
+                plas_cfg["scaling_fn"] = "none"
+                plas_cfg["shuffle"] = False
+                plas_cfg.setdefault("improvement_break", 1e-4)
+                plas_cfg.setdefault("prune_by", None)  # only reshapes to grid if not None
+                preprocess_dict = PLAS.plas_preprocess(
+                    plas_cfg=PLASConfig(**plas_cfg), fields=parentOp.input_fields, verbose=verbose
+                )
+                params_tensor = preprocess_dict["params_tensor"]
+                sorted_indices = np.lexsort(
+                    params_tensor.permute(dims=(1, 0)).cpu().numpy(),
+                )
                 sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
 
                 if "labels" in params:
@@ -755,27 +762,28 @@ class Sort(Transformation):
                     labels_name = params["labels"]
                     original_labels = input_fields[labels_name].data
                     original_labels_grid = PLAS.as_grid_img(original_labels)
+
                     updated_labels = inverse_sorted_indices[original_labels_grid]
                     new_fields[labels_name] = Field(updated_labels, parentOp)
                     decoding_update.append({
                         "input_fields": [labels_name],
                         "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
                     })
+                if "prune_by" in params:
+                    sorted_indices = PLAS.as_grid_img(sorted_indices)
 
             case {"method": "plas"}:
                 plas_cfg = {k: v for k, v in params.items() if k not in ["method"]}
-
-                plas_cfg["to_field"] = params["to_field"]
-                sorted_indices = PLAS.plas_preprocess(
+                preprocess_dict = PLAS.plas_preprocess(
                     plas_cfg=PLASConfig(**plas_cfg),
                     fields=parentOp.input_fields,
                     verbose=verbose,
                 )
+                sorted_indices = PLAS.sort(**preprocess_dict)
 
             case _:
                 raise ValueError(f"Unknown Sort parameters: {params}")
 
-        # TODO: optional label-update
         new_fields[to_field_name] = Field(sorted_indices, parentOp)
 
         return new_fields, decoding_update
@@ -791,6 +799,23 @@ class Sort(Transformation):
         })
         if params.get("method") == "plas":
             dynamic_params_config.extend(PLAS.get_dynamic_params(params))
+
+        weight_config: list[dict[str, Any]] = []
+
+        for field_name in list(params["weights"].keys()):
+            weight_config.append({
+                "label": field_name,
+                "type": "number",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "dtype": float,
+            })
+        dynamic_params_config.append({
+            "label": "weights",
+            "type": "heading",
+            "params": weight_config,
+        })
 
         return dynamic_params_config
 
@@ -828,8 +853,11 @@ class PLAS:
         return sorted_keep_indices
 
     @staticmethod
-    def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Field], verbose: bool) -> Tensor:
-        primitive_filter = PLAS.primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by].data, verbose)
+    def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Field], verbose: bool) -> dict[str, Any]:
+        if plas_cfg.prune_by is not None:
+            primitive_filter = PLAS.primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by].data, verbose)
+        else:
+            primitive_filter = None
 
         # TODO untested
         match plas_cfg.scaling_fn:
@@ -861,11 +889,28 @@ class PLAS:
         params_tensor = torch.cat(params_to_sort, dim=1)
 
         if plas_cfg.shuffle:
-            # TODO shuffling should be an option of sort_with_plas
             torch.manual_seed(42)
             shuffled_indices = torch.randperm(params_tensor.shape[0], device=params_tensor.device)
             params_tensor = params_tensor[shuffled_indices]
+        else:
+            shuffled_indices = None
 
+        return {
+            "plas_cfg": plas_cfg,
+            "params_tensor": params_tensor,
+            "shuffled_indices": shuffled_indices,
+            "primitive_filter": primitive_filter,
+            "verbose": verbose,
+        }
+
+    @staticmethod
+    def sort(
+        plas_cfg: PLASConfig,
+        params_tensor: Tensor,
+        shuffled_indices: Tensor | None,
+        primitive_filter: Tensor | None,
+        verbose: bool,
+    ) -> Tensor:
         grid_to_sort = PLAS.as_grid_img(params_tensor).permute(2, 0, 1)
         _, sorted_indices_ret = sort_with_plas(
             grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=verbose
@@ -873,7 +918,7 @@ class PLAS:
 
         sorted_indices: Tensor = sorted_indices_ret.squeeze(0).to(params_tensor.device)
 
-        if plas_cfg.shuffle:
+        if plas_cfg.shuffle and shuffled_indices is not None:
             flat_indices = sorted_indices.flatten()
             unshuffled_flat_indices = shuffled_indices[flat_indices]
             sorted_indices = unshuffled_flat_indices.reshape(sorted_indices.shape)
@@ -887,7 +932,6 @@ class PLAS:
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
 
-        field_names = list(params["weights"].keys())
         scaling_functions = ["standardize", "minmax", "none"]
 
         dynamic_params_config: list[dict[str, Any]] = []
@@ -913,22 +957,6 @@ class PLAS:
             "dtype": int,
             "mapping": lambda x: 10**x,
             "inverse_mapping": lambda x: np.log10(x),
-        })
-
-        weight_config: list[dict[str, Any]] = []
-        for field_name in field_names:
-            weight_config.append({
-                "label": field_name,
-                "type": "number",
-                "min": 0.0,
-                "max": 1.0,
-                "step": 0.05,
-                "dtype": float,
-            })
-        dynamic_params_config.append({
-            "label": "weights",
-            "type": "heading",
-            "params": weight_config,
         })
 
         return dynamic_params_config
