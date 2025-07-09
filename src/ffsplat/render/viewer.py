@@ -15,12 +15,12 @@ from jaxtyping import Float32, UInt8
 from ._renderer import Renderer, RenderTask
 
 available_output_format: list[str] = [
+    "SOG-PlayCanvas",
+    "SOG-web",
     "3DGS_INRIA_ply",
     "3DGS_INRIA_nosh_ply",
-    "SOG-web",
     "SOG-web-nosh",
     "SOG-web-sh-split",
-    "SOG-canvas",
 ]
 
 

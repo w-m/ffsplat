@@ -1,5 +1,5 @@
-profile: SOG-canvas
-profile_version: 0.1
+profile: SOG-PlayCanvas
+profile_version: 1.0
 
 scene:
   primitives: 3DGS-INRIA
@@ -164,6 +164,10 @@ ops:
           src_field: shN
           index_field: sorted_indices
 
+          # shN[sorted_indices] -> shN
+
+          # new_blah[labels] -> labels
+
   - input_fields: [sh0]
     transforms:
       - permute:
@@ -178,6 +182,7 @@ ops:
           dim: 2
           to_field: sh0
 
+  # TODO: quantize sh0 and opacities with different ranges
   - input_fields: [sh0]
     transforms:
       - simple_quantize:
