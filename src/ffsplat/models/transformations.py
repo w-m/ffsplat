@@ -1,3 +1,4 @@
+import json
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -8,6 +9,7 @@ from typing import TYPE_CHECKING, Any, override
 import cv2
 import numpy as np
 import torch
+import yaml
 from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
@@ -73,8 +75,24 @@ def write_image(output_file_path: Path, field_data: Tensor, file_type: str, codi
                 chroma=coding_params.get("chroma", 444),
                 matrix_coefficients=coding_params.get("matrix_coefficients", 0),
             )
+        case "webp":
+            Image.fromarray(field_data.cpu().numpy()).save(
+                output_file_path,
+                format="WEBP",
+                quality=coding_params.get("quality", 100),
+                lossless=coding_params.get("lossless", True),
+                method=coding_params.get("method", 6),
+                exact=coding_params.get("exact", True),
+            )
         case _:
             raise ValueError(f"Unsupported file type: {file_type}")
+
+
+def write_json(output_file_path: Path, data: dict[str, Any]) -> None:
+    """Write a dictionary to a JSON file."""
+
+    with open(output_file_path, "w") as f:
+        json.dump(data, f, indent=2)
 
 
 @dataclass
@@ -112,7 +130,7 @@ class Transformation(ABC):
     @staticmethod
     @abstractmethod
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         """Apply the transformation to the input fields. returns new/updated fields and decoding updates.
         Transformations that are only available for decoding do return empty decoding updates"""
@@ -128,7 +146,7 @@ class Cluster(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         # Implement the clustering logic here
         input_fields = parentOp.input_fields
@@ -184,7 +202,7 @@ class Cluster(Transformation):
         dynamic_params_config.append({
             "label": "distance",
             "type": "dropdown",
-            "values": ["euclidean", "cosine", "manhatten"],
+            "values": ["euclidean", "cosine", "manhattan"],
         })
 
         return dynamic_params_config
@@ -194,7 +212,7 @@ class Split(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -212,9 +230,12 @@ class Split(Transformation):
             }:
                 chunks = field_data.split(split_size_or_sections, dim)
                 for target_field_name, chunk in zip(to_field_list, chunks, strict=False):
+                    if target_field_name == "_":
+                        continue
                     if squeeze:
                         chunk = chunk.squeeze(dim)
                     new_fields[target_field_name] = Field(chunk, parentOp)
+                to_field_list = [name for name in to_field_list if name != "_"]
 
                 decoding_update.append({
                     "input_fields": to_field_list,
@@ -261,7 +282,7 @@ class Remapping(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -373,11 +394,95 @@ class Remapping(Transformation):
         return dynamic_params_config
 
 
+class Reparametrize(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        match params:
+            case {"method": "unit_sphere", "dim": dim}:
+                field_data = field_data / torch.linalg.norm(field_data, dim=dim, keepdim=True)
+
+                sign_mask = field_data.select(dim, 3) < 0
+                field_data[sign_mask] *= -1
+                new_fields[field_name] = Field(field_data, parentOp)
+
+            case {"method": "pack_quaternions", "to_fields_with_prefix": to_fields_with_prefix, "dim": dim}:
+                # Ensure the first component is positive
+                sign = field_data.select(dim, 0).sign()
+                sign[sign == 0] = 1
+                q_signed = field_data * sign.unsqueeze(-1)
+
+                # Drop the first component (is always the largest)
+                values = q_signed.narrow(dim, 1, 3)
+                max_idx = torch.zeros_like(sign, dtype=values.dtype).unsqueeze(-1)
+
+                new_fields[f"{to_fields_with_prefix}indices"] = Field(max_idx, parentOp)
+                new_fields[f"{to_fields_with_prefix}values"] = Field(values, parentOp)
+                decoding_update.append({
+                    "input_fields": [f"{to_fields_with_prefix}indices", f"{to_fields_with_prefix}values"],
+                    "transforms": [
+                        {
+                            "reparametize": {
+                                "method": "unpack_quaternions",
+                                "from_fields_with_prefix": to_fields_with_prefix,
+                                "dim": -1,
+                                "to_field_name": field_name,
+                            }
+                        }
+                    ],
+                })
+
+            case {
+                "method": "unpack_quaternions",
+                "from_fields_with_prefix": from_fields_with_prefix,
+                "dim": dim,
+                "to_field_name": to_field_name,
+            }:
+                values_field = input_fields[f"{from_fields_with_prefix}values"].data
+
+                if values_field is None:
+                    raise ValueError("values field data is None before unit sphere recovery")
+                if values_field.shape[dim] != 3:
+                    raise ValueError(f"Field data shape mismatch for unit sphere recovery: {field_data.shape}")
+
+                partial_norm_sq = (values_field**2).sum(dim=dim, keepdim=True)
+                # Recover the missing component (always non-negative)
+                w = torch.sqrt(torch.clamp(1.0 - partial_norm_sq, min=0.0))
+
+                num_components = values_field.shape[-1] + 1  # Original data had one more component
+                reconstructed = torch.zeros(
+                    *values_field.shape[:-1], num_components, dtype=values_field.dtype, device=values_field.device
+                )
+
+                # wxyz convention
+                reconstructed[..., 0] = w.squeeze(-1)
+                reconstructed[..., 1:] = values_field
+
+                # Optional re-normalization to mitigate numerical drift
+                field_data = reconstructed / torch.linalg.norm(reconstructed, dim=dim, keepdim=True)
+                new_fields[to_field_name] = Field(field_data, parentOp)
+
+            case _:
+                raise ValueError(f"Unknown ToField parameters: {params}")
+
+        return new_fields, decoding_update
+
+
 class ToField(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -403,7 +508,7 @@ class Flatten(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -416,6 +521,11 @@ class Flatten(Transformation):
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"start_dim": start_dim, "end_dim": end_dim}:
+                target_shape = field_data.shape
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"reshape": {"shape": target_shape}}],
+                })
                 field_data = field_data.flatten(start_dim=start_dim, end_dim=end_dim)
             case {"start_dim": start_dim}:
                 target_shape = field_data.shape[start_dim:]
@@ -435,7 +545,7 @@ class Reshape(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -446,6 +556,10 @@ class Reshape(Transformation):
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"start_dim": start_dim, "shape": shape}:
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [{"reshape": {"shape": field_data.shape}}],
+                })
                 target_shape = list(field_data.shape[:start_dim]) + list(shape)
                 field_data = field_data.reshape(*target_shape)
             case {"shape": shape}:
@@ -465,7 +579,7 @@ class Permute(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -492,7 +606,7 @@ class ToDType(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -533,7 +647,7 @@ class SplitBytes(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -585,31 +699,128 @@ class Reindex(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
-
         match params:
             case {"src_field": src_field_name, "index_field": index_field_name}:
                 index_field_obj = input_fields[index_field_name]
-                if len(index_field_obj.data.shape) != 2:
-                    raise ValueError("Expecting grid for re-index operation")
-                decoding_update.append({
-                    "input_fields": [src_field_name],
-                    "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
-                })
                 original_data = input_fields[src_field_name].data
                 new_fields[src_field_name] = Field(original_data[index_field_obj.data], parentOp)
+
+                if index_field_obj.data.ndim > 1:
+                    decoding_update.append({
+                        "input_fields": [src_field_name],
+                        "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
+                    })
             case _:
                 raise ValueError(f"Unknown Reindex parameters: {params}")
 
         return new_fields, decoding_update
 
 
-class PLAS(Transformation):
+class Sort(Transformation):
+    @staticmethod
+    @override
+    def apply(
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
+    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        input_fields = parentOp.input_fields
+
+        field_name = next(iter(input_fields.keys()))
+        field_data = input_fields[field_name].data
+
+        new_fields: dict[str, Field] = {}
+        decoding_update: list[dict[str, Any]] = []
+
+        sorted_indices = None
+        if field_data is None:
+            raise ValueError("Field data is None before sorting")
+        to_field_name = params["to_field"]
+        match params:
+            case {"method": "lexicographic"}:
+                # weight is effectively a boolean in this case
+                plas_cfg = {k: v for k, v in params.items() if k not in ["method", "labels"]}
+                plas_cfg["scaling_fn"] = "none"
+                plas_cfg["shuffle"] = False
+                plas_cfg.setdefault("improvement_break", 1e-4)
+                plas_cfg.setdefault("prune_by", None)  # only reshapes to grid if not None
+                preprocess_dict = PLAS.plas_preprocess(
+                    plas_cfg=PLASConfig(**plas_cfg), fields=parentOp.input_fields, verbose=verbose
+                )
+                params_tensor = preprocess_dict["params_tensor"]
+                sorted_indices = np.lexsort(
+                    params_tensor.permute(dims=(1, 0)).cpu().numpy(),
+                )
+                sorted_indices = torch.tensor(sorted_indices, device=field_data.device)
+
+                if "labels" in params:
+                    inverse_sorted_indices = torch.argsort(sorted_indices)
+                    labels_name = params["labels"]
+                    original_labels = input_fields[labels_name].data
+                    original_labels_grid = PLAS.as_grid_img(original_labels)
+
+                    updated_labels = inverse_sorted_indices[original_labels_grid]
+                    new_fields[labels_name] = Field(updated_labels, parentOp)
+                    decoding_update.append({
+                        "input_fields": [labels_name],
+                        "transforms": [{"flatten": {"start_dim": 0, "end_dim": 1}}],
+                    })
+                if "prune_by" in params:
+                    sorted_indices = PLAS.as_grid_img(sorted_indices)
+
+            case {"method": "plas"}:
+                plas_cfg = {k: v for k, v in params.items() if k not in ["method"]}
+                preprocess_dict = PLAS.plas_preprocess(
+                    plas_cfg=PLASConfig(**plas_cfg),
+                    fields=parentOp.input_fields,
+                    verbose=verbose,
+                )
+                sorted_indices = PLAS.sort(**preprocess_dict)
+
+            case _:
+                raise ValueError(f"Unknown Sort parameters: {params}")
+
+        new_fields[to_field_name] = Field(sorted_indices, parentOp)
+
+        return new_fields, decoding_update
+
+    @staticmethod
+    def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
+        dynamic_params_config: list[dict[str, Any]] = []
+        dynamic_params_config.append({
+            "label": "method",
+            "type": "dropdown",
+            "values": ["lexicographic", "plas"],
+        })
+        if params.get("method") == "plas":
+            dynamic_params_config.extend(PLAS.get_dynamic_params(params))
+
+        weight_config: list[dict[str, Any]] = []
+
+        for field_name in list(params["weights"].keys()):
+            weight_config.append({
+                "label": field_name,
+                "type": "number",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "dtype": float,
+            })
+        dynamic_params_config.append({
+            "label": "weights",
+            "type": "heading",
+            "params": weight_config,
+        })
+
+        return dynamic_params_config
+
+
+class PLAS:
     @staticmethod
     def as_grid_img(tensor: Tensor) -> Tensor:
         num_primitives = tensor.shape[0]
@@ -637,13 +848,16 @@ class PLAS(Transformation):
                 f"Removing {num_to_remove}/{num_primitives} primitives to fit the grid. ({100 * num_to_remove / num_primitives:.4f}%)"
             )
 
-        _, keep_indices = torch.topk(data, k=grid_sidelen * grid_sidelen)
+        _, keep_indices = torch.topk(data.squeeze(), k=grid_sidelen * grid_sidelen)
         sorted_keep_indices = torch.sort(keep_indices)[0]
         return sorted_keep_indices
 
     @staticmethod
-    def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Field], verbose: bool) -> Tensor:
-        primitive_filter = PLAS.primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by].data, verbose)
+    def plas_preprocess(plas_cfg: PLASConfig, fields: dict[str, Field], verbose: bool) -> dict[str, Any]:
+        if plas_cfg.prune_by is not None:
+            primitive_filter = PLAS.primitive_filter_pruning_to_square_shape(fields[plas_cfg.prune_by].data, verbose)
+        else:
+            primitive_filter = None
 
         # TODO untested
         match plas_cfg.scaling_fn:
@@ -675,11 +889,28 @@ class PLAS(Transformation):
         params_tensor = torch.cat(params_to_sort, dim=1)
 
         if plas_cfg.shuffle:
-            # TODO shuffling should be an option of sort_with_plas
             torch.manual_seed(42)
             shuffled_indices = torch.randperm(params_tensor.shape[0], device=params_tensor.device)
             params_tensor = params_tensor[shuffled_indices]
+        else:
+            shuffled_indices = None
 
+        return {
+            "plas_cfg": plas_cfg,
+            "params_tensor": params_tensor,
+            "shuffled_indices": shuffled_indices,
+            "primitive_filter": primitive_filter,
+            "verbose": verbose,
+        }
+
+    @staticmethod
+    def sort(
+        plas_cfg: PLASConfig,
+        params_tensor: Tensor,
+        shuffled_indices: Tensor | None,
+        primitive_filter: Tensor | None,
+        verbose: bool,
+    ) -> Tensor:
         grid_to_sort = PLAS.as_grid_img(params_tensor).permute(2, 0, 1)
         _, sorted_indices_ret = sort_with_plas(
             grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=verbose
@@ -687,7 +918,7 @@ class PLAS(Transformation):
 
         sorted_indices: Tensor = sorted_indices_ret.squeeze(0).to(params_tensor.device)
 
-        if plas_cfg.shuffle:
+        if plas_cfg.shuffle and shuffled_indices is not None:
             flat_indices = sorted_indices.flatten()
             unshuffled_flat_indices = shuffled_indices[flat_indices]
             sorted_indices = unshuffled_flat_indices.reshape(sorted_indices.shape)
@@ -698,35 +929,16 @@ class PLAS(Transformation):
         return sorted_indices
 
     @staticmethod
-    @override
-    def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
-    ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
-        new_fields: dict[str, Field] = {}
-
-        plas_cfg_dict = params
-        if isinstance(plas_cfg_dict, dict):
-            sorted_indices = PLAS.plas_preprocess(
-                plas_cfg=PLASConfig(**plas_cfg_dict),
-                fields=parentOp.input_fields,
-                verbose=verbose,
-            )
-            new_fields[plas_cfg_dict["to_field"]] = Field(sorted_indices, parentOp)
-        else:
-            raise TypeError(f"Unknown PLAS parameters: {params}")
-
-        return new_fields, []
-
-    @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
 
-        if params.get("weights") is None:
-            raise ValueError(f"PLAS parameters is missing weights: {params}")
-        field_names = list(params["weights"].keys())
         scaling_functions = ["standardize", "minmax", "none"]
 
         dynamic_params_config: list[dict[str, Any]] = []
+
+        params.setdefault("scaling_fn", "standardize")
+        params.setdefault("shuffle", True)
+        params.setdefault("improvement_break", 1e-4)
         dynamic_params_config.append({
             "label": "scaling_fn",
             "type": "dropdown",
@@ -747,22 +959,6 @@ class PLAS(Transformation):
             "inverse_mapping": lambda x: np.log10(x),
         })
 
-        weight_config: list[dict[str, Any]] = []
-        for field_name in field_names:
-            weight_config.append({
-                "label": field_name,
-                "type": "number",
-                "min": 0.0,
-                "max": 1.0,
-                "step": 0.05,
-                "dtype": float,
-            })
-        dynamic_params_config.append({
-            "label": "weights",
-            "type": "heading",
-            "params": weight_config,
-        })
-
         return dynamic_params_config
 
 
@@ -770,10 +966,11 @@ class Combine(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
         field_data: Tensor = torch.empty(0)
+        decoding_update: list[dict[str, Any]] = []
 
         match params:
             case {"method": "bytes", "to_field": to_field_name}:
@@ -801,24 +998,51 @@ class Combine(Transformation):
                 tensors: list[Tensor] = [
                     parentOp.input_fields[source_field_name].data for source_field_name in parentOp.input_fields
                 ]
+                decoding_update_dict = {
+                    "input_fields": [to_field_name],
+                    "transforms": [
+                        {
+                            "split": {
+                                "dim": dim,
+                                "to_field_list": list(parentOp.input_fields),
+                            }
+                        }
+                    ],
+                }
                 if method == "stack":
                     field_data = torch.stack(tensors, dim=dim)
+                    decoding_update_dict["transforms"][0]["split"]["squeeze"] = (True,)
                 elif method == "concat":
                     field_data = torch.cat(tensors, dim=dim)
+                    decoding_update_dict["transforms"][0]["split"]["squeeze"] = False
+                elif method == "stack-zeros":
+                    zeros = torch.zeros(tensors[0].shape, dtype=tensors[0].dtype, device=tensors[0].device)
+                    tensors.append(zeros)
+                    field_data = torch.stack(tensors, dim=dim)
+                    decoding_update_dict["transforms"][0]["split"]["squeeze"] = True
+                    decoding_update_dict["transforms"][0]["split"]["to_field_list"] = [
+                        *list(parentOp.input_fields),
+                        "_",
+                    ]
+
                 else:
                     raise ValueError(f"Unsupported combine method: {method}")
+                decoding_update_dict["transforms"][0]["split"]["split_size_or_sections"] = [
+                    t.shape[dim] if dim < len(t.shape) else 1 for t in tensors
+                ]
+                decoding_update.append(decoding_update_dict)
                 new_fields[to_field_name] = Field(field_data, parentOp)
             case _:
                 raise ValueError(f"Unknown Combine parameters: {params}")
 
-        return new_fields, []
+        return new_fields, decoding_update
 
 
 class Lookup(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -837,8 +1061,12 @@ class WriteFile(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any],
+        parentOp: "Operation",
+        verbose: bool = False,
+        **kwargs: Any,
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+        decoding_ops: list[dict[str, Any]] = kwargs.get("decoding_ops", [])
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"type": "ply", "file_path": file_path, "base_path": base_path, "field_prefix": field_prefix}:
@@ -856,6 +1084,8 @@ class WriteFile(Transformation):
             case {"type": "image", "image_codec": codec, "coding_params": coding_params, "base_path": base_path}:
                 for field_name, field_obj in parentOp.input_fields.items():
                     field_data = field_obj.data
+                    if field_data.shape[-1] == 1:
+                        field_data = field_data.squeeze(-1)
                     file_path = f"{field_name}.{codec}"
                     output_file_path = Path(base_path) / Path(file_path)
                     write_image(
@@ -878,6 +1108,49 @@ class WriteFile(Transformation):
                             }
                         ],
                     })
+            case {"type": "canvas-metadata", "base_path": base_path}:
+                file_path = "meta.json"
+                output_file_path = Path(base_path) / Path(file_path)
+                field_names = list(parentOp.input_fields.keys())
+                meta: dict[str, Any] = {
+                    "packer": "ffsplat",
+                    "version": 1,
+                }
+                # Readfile no input_fields
+                for field_name in field_names:
+                    field = parentOp.input_fields[field_name]
+                    shape = field.data.shape
+                    shape_meta = [int(np.array(shape[:-1]).prod()), shape[-1]]
+                    if field_name == "sh0":
+                        shape_meta = [shape_meta[0], 1, shape_meta[1]]
+                    # to keep the order semi-consistent with original sogs
+                    meta[field_name] = {"shape": shape_meta, "dtype": None, "mins": [], "maxs": [], "files": []}
+
+                    for op in decoding_ops:
+                        transforms_str = [next(iter(t_str_braced.keys())) for t_str_braced in op["transforms"]]
+                        transform_types = [transformation_map[transform] for transform in transforms_str]
+                        input_field = op["input_fields"][0] if len(op["input_fields"]) > 0 else ""
+                        for idx, (t_str, t) in enumerate(zip(transforms_str, transform_types, strict=False)):
+                            if t is ReadFile:
+                                field_name_read = op["transforms"][idx][t_str].get("field_name")
+                                if field_name_read.startswith(field_name):
+                                    codec = op["transforms"][idx][t_str].get("image_codec")
+                                    meta[field_name]["files"].append(f"{field_name_read}.{codec}")
+                            elif (
+                                (t is SimpleQuantize)
+                                and input_field.startswith(field_name)
+                                and not input_field.endswith("labels")
+                            ):
+                                meta[field_name]["dtype"] = op["transforms"][idx][t_str]["dtype"]
+                                meta[field_name]["mins"] = op["transforms"][idx][t_str]["min_values"]
+                                meta[field_name]["maxs"] = op["transforms"][idx][t_str]["max_values"]
+                            elif t is Reparametrize:
+                                if op["transforms"][idx][t_str].get("method") == "unpack_quaternions":
+                                    to_field_name = op["transforms"][idx][t_str].get("to_field_name")
+                                    if to_field_name == field_name:
+                                        meta[to_field_name]["encoding"] = "quaternion_packed"
+
+                write_json(output_file_path, meta)
             case _:
                 raise ValueError(f"Unknown WriteFile parameters: {params}")
 
@@ -894,17 +1167,15 @@ class WriteFile(Transformation):
             dynamic_params_config.append({
                 "label": "image_codec",
                 "type": "dropdown",
-                "values": ["avif", "png"],
+                "values": ["avif", "png", "webp"],
                 "rebuild": True,
             })
             # coding_params for image file
             dynamic_coding_params: list[dict[str, Any]] = []
-
+            coding_params: dict[str, Any] = params.get("coding_params", {})
             match params["image_codec"]:
                 case "avif":
                     # check whether we need to update the coding params default:
-                    coding_params: dict[str, Any] = params.get("coding_params", {})
-
                     if not all(key in coding_params for key in ["quality", "chroma", "matrix_coefficients"]):
                         coding_params.clear()
                         coding_params["quality"] = -1
@@ -946,7 +1217,6 @@ class WriteFile(Transformation):
                     })
 
                 case "png":
-                    coding_params = params.get("coding_params", {})
                     if "compression_level" not in coding_params:
                         coding_params.clear()
                         coding_params["compression_level"] = 3
@@ -964,6 +1234,46 @@ class WriteFile(Transformation):
                         "type": "heading",
                         "params": dynamic_coding_params,
                     })
+                case "webp":
+                    if not all(key in coding_params for key in ["quality", "method", "exact", "lossless"]):
+                        coding_params.clear()
+                        coding_params["quality"] = 100
+                        coding_params["method"] = 6
+                        coding_params["exact"] = True
+                        coding_params["lossless"] = True
+                    dynamic_coding_params.append({
+                        "label": "exact",
+                        "type": "bool",
+                        "values": ["True", "False"],
+                    })
+                    dynamic_coding_params.append({
+                        "label": "lossless",
+                        "type": "bool",
+                        "values": ["True", "False"],
+                    })
+                    # filesize-speed tradeoff when lossless
+                    dynamic_coding_params.append({
+                        "label": "quality",
+                        "type": "number",
+                        "min": 0,
+                        "max": 100,
+                        "step": 1,
+                        "dtype": int,
+                    })
+                    # also filesize-speed tradeoff, all compatible with lossless
+                    dynamic_coding_params.append({
+                        "label": "method",
+                        "type": "number",
+                        "dtype": int,
+                        "min": 0,
+                        "max": 6,
+                        "step": 1,
+                    })
+                    dynamic_params_config.append({
+                        "label": "coding_params",
+                        "type": "heading",
+                        "params": dynamic_coding_params,
+                    })
 
                 case _:
                     raise ValueError(f"unknown image codec: {params["image_codec"]}")
@@ -975,7 +1285,7 @@ class ReadFile(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
@@ -993,6 +1303,8 @@ class ReadFile(Transformation):
                         # TODO: only do this once?
                         register_avif_opener()
                         img_field_data = torch.tensor(np.array(Image.open(file_path)))
+                    case "webp":
+                        img_field_data = torch.tensor(np.array(Image.open(file_path)))
 
                 new_fields[field_name] = Field.from_file(img_field_data, file_path, field_name)
             case _:
@@ -1005,7 +1317,7 @@ class SimpleQuantize(Transformation):
     @staticmethod
     @override
     def apply(
-        params: dict[str, Any], parentOp: "Operation", verbose: bool = False
+        params: dict[str, Any], parentOp: "Operation", verbose: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Field], list[dict[str, Any]]]:
         input_fields = parentOp.input_fields
 
@@ -1014,6 +1326,13 @@ class SimpleQuantize(Transformation):
 
         new_fields: dict[str, Field] = {}
         decoding_update: list[dict[str, Any]] = []
+        torch_dtype_to_str = {
+            torch.float32: "float32",
+            torch.uint8: "uint8",
+            torch.uint16: "uint16",
+            torch.uint32: "uint32",
+            torch.int32: "int32",
+        }
         match params:
             case {"min": min_val, "max": max_val, "dim": dim, "dtype": dtype_str, "round_to_int": round_to_int}:
                 min_val_f = float(min_val)
@@ -1030,23 +1349,16 @@ class SimpleQuantize(Transformation):
 
                 field_data = normalized
 
-                torch_dtype_to_str = {
-                    torch.float32: "float32",
-                    torch.uint8: "uint8",
-                    torch.uint16: "uint16",
-                    torch.uint32: "uint32",
-                    torch.int32: "int32",
-                }
-
                 decoding_update.append({
                     "input_fields": [field_name],
                     "transforms": [
                         {
                             "simple_quantize": {
-                                "min_values": min_vals.tolist(),
-                                "max_values": max_vals.tolist(),
+                                "min_values": min_vals.tolist() if min_vals.ndim > 0 else [min_vals.item()],
+                                "max_values": max_vals.tolist() if max_vals.ndim > 0 else [max_vals.item()],
                                 "dim": dim,
                                 "dtype": torch_dtype_to_str[field_data.dtype],
+                                "round_to_int": False,  # in backmapping usually don't want rounding, right?
                             }
                         }
                     ],
@@ -1061,11 +1373,13 @@ class SimpleQuantize(Transformation):
                 "max_values": max_values,
                 "dim": dim,
                 "dtype": dtype_str,
+                "round_to_int": round_to_int,
             }:
                 if field_data is None:
                     raise ValueError("Field data is None before channelwise remapping")
 
-                field_data = convert_to_dtype(field_data, dtype_str)
+                min_vals = torch.amin(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
+                max_vals = torch.amax(field_data, dim=[d for d in range(field_data.ndim) if d != dim])
 
                 min_tensor = torch.tensor(min_values, device=field_data.device, dtype=torch.float32)
                 max_tensor = torch.tensor(max_values, device=field_data.device, dtype=torch.float32)
@@ -1082,8 +1396,28 @@ class SimpleQuantize(Transformation):
 
                 field_data = minmax(field_data)
                 field_data = field_data * field_range + min_tensor
+
+                decoding_update.append({
+                    "input_fields": [field_name],
+                    "transforms": [
+                        {
+                            "simple_quantize": {
+                                "min_values": min_vals.tolist(),
+                                "max_values": max_vals.tolist(),
+                                "dim": dim,
+                                "dtype": torch_dtype_to_str[field_data.dtype],
+                                "round_to_int": False,  # in backmapping usually don't want rounding, right?
+                            }
+                        }
+                    ],
+                })
+
+                if round_to_int:
+                    field_data = torch.round(field_data)
+                field_data = convert_to_dtype(field_data, dtype_str)
+
             case _:
-                raise ValueError(f"Unknown remapping parameters: {params}")
+                raise ValueError(f"Unknown simple_quantize parameters: {params}")
         new_fields[field_name] = Field(field_data, parentOp)
         return new_fields, decoding_update
 
@@ -1123,12 +1457,13 @@ transformation_map = {
     "flatten": Flatten,
     "reshape": Reshape,
     "remapping": Remapping,
+    "reparametize": Reparametrize,
     "to_field": ToField,
     "permute": Permute,
     "to_dtype": ToDType,
     "split_bytes": SplitBytes,
     "reindex": Reindex,
-    "plas": PLAS,
+    "sort": Sort,
     "lookup": Lookup,
     "combine": Combine,
     "write_file": WriteFile,
@@ -1137,17 +1472,32 @@ transformation_map = {
 }
 
 
-def apply_transform(parentOp: "Operation", verbose: bool) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
+def apply_transform(
+    parentOp: "Operation", verbose: bool, decoding_params_hashable: str
+) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
     transformation = transformation_map.get(parentOp.transform_type)
     if transformation is None:
         raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
-    return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose)
+    elif transformation is WriteFile:
+        decoding_ops: list[dict[str, Any]] = yaml.load(decoding_params_hashable, Loader=yaml.SafeLoader)["ops"]
+        return transformation.apply(
+            parentOp.params[parentOp.transform_type], parentOp, verbose=verbose, decoding_ops=decoding_ops
+        )
+    else:
+        return transformation.apply(parentOp.params[parentOp.transform_type], parentOp, verbose=verbose)
 
 
-def get_dynamic_params(params: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def get_dynamic_params(params: dict[str, dict[str, Any]], input_field: list | str) -> list[dict[str, Any]]:
     """Get the dynamic parameters for a given transformation type. This might modify the values in params."""
     transform_type = next(iter(params.keys()))
     transformation = transformation_map.get(transform_type)
     if transformation is None:
         raise ValueError(f"Unknown transformation: {transform_type}")
+    elif (
+        transformation is Sort
+        and params[transform_type]["method"] == "plas"
+        and "weights" not in params[transform_type]
+    ):
+        params[transform_type]["weights"] = {k: 1.0 for k in input_field}
+
     return transformation.get_dynamic_params(params[transform_type])

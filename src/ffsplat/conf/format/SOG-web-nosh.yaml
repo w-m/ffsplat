@@ -31,12 +31,13 @@ ops:
           split_size_or_sections: [1]
           dim: 1
           squeeze: false
-          to_field_list: [f_dc]
+          to_field_list: [f_dc, _]
 
   - input_fields:
       [means_bytes_0, means_bytes_1, f_dc, opacities, scales, quaternions]
     transforms:
-      - plas:
+      - sort:
+          method: plas
           prune_by: opacities
           scaling_fn: standardize
           # activated: true

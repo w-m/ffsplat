@@ -1,4 +1,5 @@
 import copy
+import json
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -92,6 +93,18 @@ class DecodingParams:
                 continue
             self.ops[-1]["transforms"].reverse()
 
+    def get_ops_hashable(self) -> str:
+        return json.dumps(self.ops, sort_keys=False)
+
+    def to_yaml(self) -> str:
+        """Convert the decoding parameters to a YAML string."""
+        return yaml.dump(
+            asdict(self),
+            Dumper=SerializableDumper,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
 
 @dataclass
 class EncodingParams:
@@ -128,14 +141,11 @@ SerializableDumper.add_multi_representer(object, SerializableDumper.represent_ge
 
 
 @lru_cache
-def process_operation(
-    op: Operation,
-    verbose: bool,
-) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+def process_operation(op: Operation, verbose: bool, decoding_ops: str) -> tuple[dict[str, Field], list[dict[str, Any]]]:
     """Process the operation and return the new fields and decoding updates."""
     if verbose:
         print(f"Encoding {op}...")
-    return op.apply(verbose=verbose)
+    return op.apply(verbose=verbose, decoding_params_hashable=decoding_ops)
 
 
 @dataclass
@@ -154,10 +164,9 @@ class SceneEncoder:
             input_fields_params = op_params["input_fields"]
             for transform_param in op_params["transforms"]:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
-                if op.transform_type != "write_file":
-                    new_fields, decoding_updates = process_operation(op, verbose=verbose)
-                else:
-                    new_fields, decoding_updates = op.apply(verbose=verbose)
+                new_fields, decoding_updates = process_operation(
+                    op, verbose=verbose, decoding_ops=self.decoding_params.to_yaml()
+                )
                 #  if the coding_updates are not a copy the cache will be wrong
                 for decoding_update in copy.deepcopy(decoding_updates):
                     # if the last decoding update has the same input fields we can combine the transforms into one list
@@ -201,6 +210,8 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-nosh.yaml"))
         case "SOG-web-sh-split":
             encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-sh-split.yaml"))
+        case "SOG-canvas":
+            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-canvas.yaml"))
         case _:
             raise ValueError(f"Unsupported output format: {output_format}")
 

@@ -44,14 +44,15 @@ ops:
         quaternions,
       ]
     transforms:
-      - plas:
+      - sort:
+          method: plas
           prune_by: opacities
           scaling_fn: standardize
           # activated: true
           shuffle: true
           improvement_break: 1e-4
           # improvement_break: 0.1
-          to_field: sorted_indices
+          to_fields: sorted_indices
           weights:
             means_bytes_0: 0.1
             means_bytes_1: 1.0

@@ -1,0 +1,337 @@
+profile: SOG-PlayCanvas
+profile_version: 1.0
+
+scene:
+  primitives: 3DGS-INRIA
+  params:
+    - means
+    - scales
+    - opacities
+    - quaternions
+    - sh
+
+ops:
+  - input_fields: [sh]
+    transforms:
+      - split:
+          to_field_list: [sh0, shN]
+          split_size_or_sections: [1, 15]
+          dim: 1
+          squeeze: false
+
+  - input_fields: [means]
+    transforms:
+      - remapping:
+          method: signed-log
+          to_field: means
+
+  - input_fields: [scales]
+    transforms:
+      - remapping:
+          method: log
+
+  - input_fields: [opacities]
+    transforms:
+      - remapping:
+          method: inverse-sigmoid
+
+  - input_fields: [quaternions]
+    transforms:
+      - reparametize:
+          method: unit_sphere
+          dim: -1
+
+  - input_fields: [means, sh0, shN, opacities, scales, quaternions]
+    transforms:
+      - sort:
+          method: plas
+          prune_by: opacities
+          scaling_fn: none
+          shuffle: true
+          improvement_break: 1e-4
+          to_field: sorted_indices
+          weights:
+            means: 1.0
+            sh0: 1.0
+            shN: 0.0
+            opacities: 0.0
+            scales: 1.0
+            quaternions: 1.0
+
+  #means
+  - input_fields: [means, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: means
+          index_field: sorted_indices
+
+  - input_fields: [means]
+    transforms:
+      - simple_quantize:
+          dtype: uint16
+          min: 0
+          max: 65535
+          dim: 2
+          round_to_int: true
+      - split_bytes:
+          to_fields_with_prefix: means_bytes_
+          num_bytes: 2
+
+  - input_fields: [means_bytes_0]
+    transforms:
+      - to_field:
+          to_field_name: means_l
+
+  - input_fields: [means_bytes_1]
+    transforms:
+      - to_field:
+          to_field_name: means_u
+
+  #scales
+  - input_fields: [scales, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: scales
+          index_field: sorted_indices
+
+  - input_fields: [scales]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [opacities, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: opacities
+          index_field: sorted_indices
+
+  - input_fields: [quaternions, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: quaternions
+          index_field: sorted_indices
+
+  - input_fields: [quaternions] # for tracking decoding_ops
+    transforms:
+      - to_field:
+          to_field_name: quats
+
+  - input_fields: [quats]
+    transforms:
+      - reparametize:
+          method: pack_quaternions
+          to_fields_with_prefix: quats_packed_
+          dim: -1
+
+  - input_fields: [quats_packed_indices]
+    transforms:
+      - simple_quantize:
+          min: 252
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [quats_packed_values]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [quats_packed_values, quats_packed_indices]
+    transforms:
+      - combine:
+          method: concat
+          dim: 2
+          to_field: quats
+
+  - input_fields: [sh0, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: sh0
+          index_field: sorted_indices
+
+  - input_fields: [shN, sorted_indices]
+    transforms:
+      - reindex:
+          src_field: shN
+          index_field: sorted_indices
+
+          # shN[sorted_indices] -> shN
+
+          # new_blah[labels] -> labels
+
+  - input_fields: [sh0]
+    transforms:
+      - permute:
+          dims: [0, 1, 3, 2]
+      - flatten:
+          start_dim: 2
+
+  - input_fields: [sh0, opacities] #opacity-sh0 rgba
+    transforms:
+      - combine:
+          method: concat
+          dim: 2
+          to_field: sh0
+
+  # TODO: quantize sh0 and opacities with different ranges
+  - input_fields: [sh0]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [shN]
+    transforms:
+      - flatten:
+          start_dim: 2
+      - flatten:
+          start_dim: 0
+          end_dim: 1
+      - cluster:
+          method: kmeans
+          num_clusters: 65536
+          distance: manhattan
+          to_fields_with_prefix: shN_
+
+  - input_fields: [shN_centroids]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 255
+          dim: 2
+          dtype: uint8
+          round_to_int: true
+
+  - input_fields: [shN_centroids, shN_labels]
+    transforms:
+      - sort:
+          method: lexicographic
+          labels: shN_labels
+          weights:
+            shN_labels: 0.0
+            shN_centroids: 1.0
+          to_field: shN_centroids_indices
+
+  - input_fields: [shN_centroids, shN_centroids_indices]
+    transforms:
+      - reindex:
+          src_field: shN_centroids
+          index_field: shN_centroids_indices
+
+  - input_fields: [shN_centroids]
+    transforms:
+      - reshape:
+          shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3) =
+
+  - input_fields: [shN_labels]
+    transforms:
+      - simple_quantize:
+          min: 0
+          max: 65535
+          dim: 2
+          dtype: uint16
+          round_to_int: False
+      - split_bytes:
+          to_fields_with_prefix: shN_labels_
+          num_bytes: 2
+
+  - input_fields: [shN_labels_0, shN_labels_1]
+    transforms:
+      - combine:
+          method: stack-zeros
+          dim: 2
+          to_field: shN_labels
+
+  - input_fields: [means_l]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [means_u]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [scales]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [quats]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [sh0] #rgb
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [shN_centroids]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [shN_labels]
+    transforms:
+      - write_file:
+          type: image
+          image_codec: webp
+          coding_params:
+            lossless: true
+            quality: 100
+            method: 6
+            exact: true
+
+  - input_fields: [means, scales, quats, sh0, shN]
+    transforms:
+      - write_file:
+          type: canvas-metadata
