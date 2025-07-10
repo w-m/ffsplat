@@ -154,7 +154,8 @@ def evaluation(gaussians: Gaussians, valset: Dataset, data_path: Path, results_p
     )
 
 
-if __name__ == "__main__":
+def main():
+    """Entry for evaluation."""
     parser = ArgumentParser(description="Interactive compression tool parameters")
     parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--data-path", type=Path)
@@ -179,3 +180,7 @@ if __name__ == "__main__":
     dataset = Dataset(dataparser)
 
     evaluation(gaussians, dataset, args.data_path, args.results_path)
+
+
+if __name__ == "__main__":
+    main()

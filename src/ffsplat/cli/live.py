@@ -881,7 +881,12 @@ def main():
     )
 
     print("Viewer running... Ctrl+C to exit.")
-    time.sleep(100000)
+    while True:
+        try:
+            time.sleep(1)
+        except KeyboardInterrupt:
+            print("Exiting viewer...")
+            break
 
 
 if __name__ == "__main__":

@@ -88,7 +88,11 @@ def main():
     Viewer(server=server, render_fn=render_fn_for_viewer, mode="rendering")
     print("Viewer running... Ctrl+C to exit.")
     while True:
-        time.sleep(0.1)
+        try:
+            time.sleep(1)
+        except KeyboardInterrupt:
+            print("Exiting viewer...")
+            break
 
 
 if __name__ == "__main__":
