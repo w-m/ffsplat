@@ -52,7 +52,7 @@ def render_fn(
 
 
 # Create render function with bound parameters
-def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
+def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int], gaussians) -> NDArray:
     return render_fn(
         gaussians.means.data,
         gaussians.quaternions.data,
@@ -65,7 +65,7 @@ def bound_render_fn(camera_state: CameraState, img_wh: tuple[int, int]) -> NDArr
     )
 
 
-if __name__ == "__main__":
+def main():
     parser = ArgumentParser(description="Interactive compression tool parameters")
     parser.add_argument("--input", type=Path, required=True, help="Input file or directory path")
     # TODO: add support for guessing input format
@@ -81,7 +81,15 @@ if __name__ == "__main__":
 
     gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format, verbose=cfg.verbose).to("cuda")
 
+    # The bound_render_fn needs the gaussians object. We can bind it here.
+    render_fn_for_viewer = lambda camera_state, img_wh: bound_render_fn(camera_state, img_wh, gaussians)
+
     server = viser.ViserServer(verbose=False)
-    viewer = Viewer(server=server, render_fn=bound_render_fn, mode="rendering")
+    Viewer(server=server, render_fn=render_fn_for_viewer, mode="rendering")
     print("Viewer running... Ctrl+C to exit.")
-    time.sleep(100000)
+    while True:
+        time.sleep(0.1)
+
+
+if __name__ == "__main__":
+    main()

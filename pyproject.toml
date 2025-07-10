@@ -34,27 +34,15 @@ dependencies = [
     "torchmetrics>=1.6.1,<2.0.0",
     "torchpq>=0.3.0.6,<0.4.0", # kmeans clustering
     "cupy-cuda12x>=13.4.1,<14.0.0", # torchpq dependency
-    "camorph>=0.3.6,<1.0.0",
-    "plas",
-    "viser",
+    "camorph @ git+https://github.com/Fraunhofer-IIS/camorph@2c95c8b15b0532d6280091761a9b51ab65cd2f98",
+    "plas @ git+https://github.com/fraunhoferhhi/PLAS.git@4f1109c94f29a5a6de62bdf8f20cb3ce1ff0e680",
+    "viser @ git+https://github.com/w-m/viser.git@03b87b8c1521a0afe79d885e684f1cb0b3323294",
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
-
-[tool.uv.sources]
-torch = [
-  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-torchvision = [
-  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-camorph = { git = "https://github.com/Fraunhofer-IIS/camorph" }
-plas = { git = "https://github.com/fraunhoferhhi/PLAS.git" }
-# newest release does not support html elements. Use a commit that does. This can be changed with the next release.
-viser = { path = "extern/viser", editable = true }
 
 [project.urls]
 Homepage = "https://w-m.github.io/ffsplat/"
@@ -93,10 +81,9 @@ build-backend = "setuptools.build_meta"
 "ffsplat.conf.decoding_templates" = ["*.yaml"]
 "ffsplat.conf.format" = ["*.yaml"]
 
-
 [tool.mypy]
 files = ["src"]
-exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*", "extern/viser/.*"]
+exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -167,9 +154,6 @@ ignore = [
 
 [tool.ruff.format]
 preview = true
-
-[tool.deptry]
-extend_exclude = ["extern"]
 
 [tool.deptry.per_rule_ignores]
 # cupy required for kmeans in torchpq, but we don't import it explicitly in the code base

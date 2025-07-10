@@ -28,7 +28,7 @@ Then open a web browser to [localhost:8080](http://localhost:8080) (or the addre
 Check out the project with submodules:
 
 ```
-git clone --recurse-submodules https://github.com/w-m/ffsplat.git
+git clone https://github.com/w-m/ffsplat.git
 cd ffsplat
 ```
 
