@@ -150,7 +150,7 @@ class EncodingParams:
     def from_template_yaml(cls, template_name: str) -> "EncodingParams":
         try:
             with importlib.resources.as_file(
-                importlib.resources.files("ffsplat.conf.format").joinpath(template_name)
+                importlib.resources.files("ffsplat.conf.format").joinpath(f"{template_name}.yaml")
             ) as yaml_path:
                 return cls.from_yaml_file(yaml_path)
         except FileNotFoundError as exc:

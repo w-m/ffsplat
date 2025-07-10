@@ -38,8 +38,8 @@ from ..render.viewer import CameraState, Viewer
 available_output_format: list[str] = [
     "SOG-PlayCanvas",
     "SOG-web",
-    "3DGS_INRIA_ply",
-    "3DGS_INRIA_nosh_ply",
+    "3DGS-INRIA-ply",
+    "3DGS-INRIA-nosh-ply",
     "SOG-web-png",
     "SOG-web-nosh",
     "SOG-web-sh-split",
@@ -497,7 +497,7 @@ class InteractiveConversionTool:
 
     def _load_encoding_params(self):
         output_format = self.viewer._output_dropdown.value
-        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+        self.encoding_params = EncodingParams.from_template_yaml(output_format)
 
     def _build_convert_options(self):
         for handle in self.viewer.convert_gui_handles:
@@ -832,9 +832,7 @@ class Runner:
         description += f"{output_format}  \n"
         changed_params_desc = ""
 
-        initial_params: EncodingParams = EncodingParams.from_yaml_file(
-            Path(f"src/ffsplat/conf/format/{output_format}.yaml")
-        )
+        initial_params: EncodingParams = EncodingParams.from_template_yaml(output_format)
         for op_id, op in enumerate(encoding_params.ops):
             for transform_id, transform in enumerate(op["transforms"]):
                 if transform != initial_params.ops[op_id]["transforms"][transform_id]:
