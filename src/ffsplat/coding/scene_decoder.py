@@ -107,7 +107,7 @@ def decode_gaussians(input_path: Path, input_format: str, verbose: bool) -> Gaus
         if input_file_extension == ".ply":
             with importlib.resources.as_file(
                 importlib.resources.files("ffsplat.conf.decoding_templates").joinpath(
-                    "3DGS_INRIA_ply_decoding_template"
+                    "3DGS_INRIA_ply_decoding_template.yaml"
                 )
             ) as yaml_path:
                 decoding_params = DecodingParams.from_yaml_file(yaml_path).with_input_path(input_path)
