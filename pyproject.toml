@@ -55,6 +55,8 @@ ffsplat-view = "ffsplat.cli.view:main"
 # ffsplat-probe = "ffsplat.cli.probe:main"
 ffsplat-live = "ffsplat.cli.live:main"
 ffsplat-eval = "ffsplat.cli.eval:main"
+# Unified entry point that dispatches to the sub-commands above.
+ffsplat = "ffsplat.cli.__main__:main"
 # ffsplat-opt = "ffsplat.cli.opt:main"
 
 
