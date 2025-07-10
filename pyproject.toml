@@ -1,6 +1,6 @@
 [project]
 name = "ffsplat"
-version = "0.0.1"
+version = "0.1"
 description = "A conversion tool for splatting scenes."
 authors = [{ name = "Wieland Morgenstern", email = "wieland.morgenstern@hhi.fraunhofer.de" }]
 readme = "README.md"
