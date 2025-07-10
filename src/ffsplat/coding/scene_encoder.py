@@ -1,5 +1,6 @@
 import copy
 import importlib.metadata
+import importlib.resources
 import json
 from collections import defaultdict
 from collections.abc import Iterable
@@ -146,6 +147,16 @@ class EncodingParams:
     ops: list[dict[str, Any]]
 
     @classmethod
+    def from_template_yaml(cls, template_name: str) -> "EncodingParams":
+        try:
+            with importlib.resources.as_file(
+                importlib.resources.files("ffsplat.conf.format").joinpath(template_name)
+            ) as yaml_path:
+                return cls.from_yaml_file(yaml_path)
+        except FileNotFoundError as exc:
+            raise ValueError(f"No template for {template_name} found!") from exc
+
+    @classmethod
     def from_yaml_file(cls, yaml_path: Path) -> "EncodingParams":
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
@@ -227,23 +238,7 @@ class SceneEncoder:
 
 
 def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str, verbose: bool) -> None:
-    match output_format:
-        case "3DGS-INRIA.ply":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_ply.yaml"))
-        case "3DGS-INRIA-nosh.ply":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_nosh_ply.yaml"))
-        case "SOG-web":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web.yaml"))
-        case "SOG-web-png":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-png.yaml"))
-        case "SOG-web-nosh":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-nosh.yaml"))
-        case "SOG-web-sh-split":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-sh-split.yaml"))
-        case "SOG-canvas":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-canvas.yaml"))
-        case _:
-            raise ValueError(f"Unsupported output format: {output_format}")
+    encoding_params = EncodingParams.from_template_yaml(output_format)
 
     encoder = SceneEncoder(
         encoding_params=encoding_params,
