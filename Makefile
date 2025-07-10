@@ -27,6 +27,19 @@ build: clean-build ## Build wheel file
 	@echo "🚀 Creating wheel file"
 	@uvx --from build pyproject-build --installer uv
 
+.PHONY: test-install
+test-install: build
+	@echo "--- Creating temporary uv virtual environment for testing installation ---"
+	@rm -rf tmp_test_env
+	@uv venv tmp_test_env --seed
+	@echo "--- Installing wheel into temporary environment using uv ---"
+	@uv pip install --python ./tmp_test_env/bin/python dist/*.whl
+	@echo "--- Verifying installation by running ffsplat-view --help ---"
+	@./tmp_test_env/bin/ffsplat-view --help
+	@echo "--- Cleaning up temporary virtual environment ---"
+	@rm -rf tmp_test_env
+	@echo "--- Installation test successful ---"
+
 .PHONY: clean-build
 clean-build: ## Clean build artifacts
 	@echo "🚀 Removing build artifacts"

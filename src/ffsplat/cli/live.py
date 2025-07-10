@@ -38,8 +38,8 @@ from ..render.viewer import CameraState, Viewer
 available_output_format: list[str] = [
     "SOG-PlayCanvas",
     "SOG-web",
-    "3DGS_INRIA_ply",
-    "3DGS_INRIA_nosh_ply",
+    "3DGS-INRIA-ply",
+    "3DGS-INRIA-nosh-ply",
     "SOG-web-png",
     "SOG-web-nosh",
     "SOG-web-sh-split",
@@ -497,7 +497,7 @@ class InteractiveConversionTool:
 
     def _load_encoding_params(self):
         output_format = self.viewer._output_dropdown.value
-        self.encoding_params = EncodingParams.from_yaml_file(Path(f"src/ffsplat/conf/format/{output_format}.yaml"))
+        self.encoding_params = EncodingParams.from_template_yaml(output_format)
 
     def _build_convert_options(self):
         for handle in self.viewer.convert_gui_handles:
@@ -768,10 +768,7 @@ class Runner:
             encoding_params=encoding_params,
             output_path=output_path,
             fields=self.conv_tool.input_gaussians.to_field_dict(),
-            decoding_params=DecodingParams(
-                container_identifier="smurfx",
-                container_version="0.1",
-                packer="ffsplat-v0.1",
+            decoding_params=DecodingParams.default_ffsplat_packer(
                 profile=encoding_params.profile,
                 profile_version=encoding_params.profile_version,
                 scene=encoding_params.scene,
@@ -835,9 +832,7 @@ class Runner:
         description += f"{output_format}  \n"
         changed_params_desc = ""
 
-        initial_params: EncodingParams = EncodingParams.from_yaml_file(
-            Path(f"src/ffsplat/conf/format/{output_format}.yaml")
-        )
+        initial_params: EncodingParams = EncodingParams.from_template_yaml(output_format)
         for op_id, op in enumerate(encoding_params.ops):
             for transform_id, transform in enumerate(op["transforms"]):
                 if transform != initial_params.ops[op_id]["transforms"][transform_id]:
@@ -881,7 +876,12 @@ def main():
     )
 
     print("Viewer running... Ctrl+C to exit.")
-    time.sleep(100000)
+    while True:
+        try:
+            time.sleep(1)
+        except KeyboardInterrupt:
+            print("Exiting viewer...")
+            break
 
 
 if __name__ == "__main__":

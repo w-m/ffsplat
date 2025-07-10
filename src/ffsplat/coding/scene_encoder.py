@@ -1,4 +1,6 @@
 import copy
+import importlib.metadata
+import importlib.resources
 import json
 from collections import defaultdict
 from collections.abc import Iterable
@@ -13,6 +15,9 @@ import yaml
 from ..models.fields import Field, FieldDict
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
+
+CONTAINER_IDENTIFIER = "smurfx"
+CONTAINER_VERSION = "0.1"
 
 
 class SerializableDumper(yaml.SafeDumper):
@@ -82,6 +87,32 @@ class DecodingParams:
     ops: list[dict[str, Any]] = field(default_factory=list)
     scene: dict[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def default_ffsplat_packer(
+        cls,
+        profile: str,
+        profile_version: str,
+        meta: dict[str, Any] | None = None,
+        ops: list[dict[str, Any]] | None = None,
+        scene: dict[str, Any] | None = None,
+    ) -> "DecodingParams":
+        """Create a default DecodingParams instance for the ffsplat packer."""
+        try:
+            version = importlib.metadata.version("ffsplat")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        packer = f"ffsplat-{version}"
+        return cls(
+            container_identifier=CONTAINER_IDENTIFIER,
+            container_version=CONTAINER_VERSION,
+            packer=packer,
+            profile=profile,
+            profile_version=profile_version,
+            meta=meta or {},
+            ops=ops or [],
+            scene=scene or {},
+        )
+
     def reverse_ops(self) -> None:
         """The operations we're accumulation during encoding need to be reversed for decoding."""
         prev_ops = self.ops.copy()
@@ -114,6 +145,16 @@ class EncodingParams:
     scene: dict[str, Any]
 
     ops: list[dict[str, Any]]
+
+    @classmethod
+    def from_template_yaml(cls, template_name: str) -> "EncodingParams":
+        try:
+            with importlib.resources.as_file(
+                importlib.resources.files("ffsplat.conf.format").joinpath(f"{template_name}.yaml")
+            ) as yaml_path:
+                return cls.from_yaml_file(yaml_path)
+        except FileNotFoundError as exc:
+            raise ValueError(f"No template for {template_name} found!") from exc
 
     @classmethod
     def from_yaml_file(cls, yaml_path: Path) -> "EncodingParams":
@@ -197,32 +238,13 @@ class SceneEncoder:
 
 
 def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str, verbose: bool) -> None:
-    match output_format:
-        case "3DGS-INRIA.ply":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_ply.yaml"))
-        case "3DGS-INRIA-nosh.ply":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/3DGS_INRIA_nosh_ply.yaml"))
-        case "SOG-web":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web.yaml"))
-        case "SOG-web-png":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-png.yaml"))
-        case "SOG-web-nosh":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-nosh.yaml"))
-        case "SOG-web-sh-split":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-web-sh-split.yaml"))
-        case "SOG-canvas":
-            encoding_params = EncodingParams.from_yaml_file(Path("src/ffsplat/conf/format/SOG-canvas.yaml"))
-        case _:
-            raise ValueError(f"Unsupported output format: {output_format}")
+    encoding_params = EncodingParams.from_template_yaml(output_format)
 
     encoder = SceneEncoder(
         encoding_params=encoding_params,
         output_path=output_path,
         fields=gaussians.to_field_dict(),
-        decoding_params=DecodingParams(
-            container_identifier="smurfx",
-            container_version="0.1",
-            packer="ffsplat-v0.1",
+        decoding_params=DecodingParams.default_ffsplat_packer(
             profile=encoding_params.profile,
             profile_version=encoding_params.profile_version,
             scene=encoding_params.scene,

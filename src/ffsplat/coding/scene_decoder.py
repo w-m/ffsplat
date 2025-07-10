@@ -1,3 +1,4 @@
+import importlib.resources
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -104,16 +105,22 @@ def decode_gaussians(input_path: Path, input_format: str, verbose: bool) -> Gaus
 
     if input_format == "3DGS-INRIA.ply":
         if input_file_extension == ".ply":
-            decoding_params = DecodingParams.from_yaml_file(
-                Path("3DGS_INRIA_ply_decoding_template.yaml")
-            ).with_input_path(input_path)
+            with importlib.resources.as_file(
+                importlib.resources.files("ffsplat.conf.decoding_templates").joinpath(
+                    "3DGS_INRIA_ply_decoding_template.yaml"
+                )
+            ) as yaml_path:
+                decoding_params = DecodingParams.from_yaml_file(yaml_path).with_input_path(input_path)
         else:
             raise ValueError("Input file must be a .ply file for 3DGS-INRIA format")
     elif input_format == "3DGS-INRIA-nosh.ply":
         if input_file_extension == ".ply":
-            decoding_params = DecodingParams.from_yaml_file(
-                Path("3DGS_INRIA_ply_nosh_decoding_template.yaml")
-            ).with_input_path(input_path)
+            with importlib.resources.as_file(
+                importlib.resources.files("ffsplat.conf.decoding_templates").joinpath(
+                    "3DGS_INRIA_ply_nosh_decoding_template.yaml"
+                )
+            ) as yaml_path:
+                decoding_params = DecodingParams.from_yaml_file(yaml_path).with_input_path(input_path)
         else:
             raise ValueError("Input file must be a .ply file for 3DGS-INRIA format")
     elif input_format == "smurfx":
