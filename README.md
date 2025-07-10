@@ -19,13 +19,13 @@ ffsplat is a powerful framework to convert and compress 3D Gaussian Splatting sc
 
 Run
 
-`uvx --from git+https://github.com/w-m/ffsplat@main ffsplat-live --help`
+`uvx --from git+https://github.com/w-m/ffsplat@main ffsplat live --help`
 
-Then open a web browser to [localhost:8080](http://localhost:8080) (or the address that is printed in the viser box on stdout).
+Then open a web browser to [localhost:8080](http://localhost:8080) (or the address that is printed in the viser box on stdout). On the first launch, it will take a few minutes to compile gsplat kernels before a rendered image shows up.
 
 ## Setting up a dev environment
 
-Check out the project with submodules:
+Check out the project:
 
 ```
 git clone https://github.com/w-m/ffsplat.git
@@ -41,7 +41,7 @@ make install
 Run the live encoding:
 
 ```bash
-uv run -m ffsplat.cli.live \
+uv run ffsplat live \
     --input /data/gaussian_splatting/mini-splatting2/truck_sparse/point_cloud/iteration_18000/point_cloud.ply \
     --input-format=3DGS-INRIA.ply \
     --dataset-path /data/gaussian_splatting/tandt_db/tandt/truck/ \
