@@ -89,6 +89,11 @@ dev = [
 requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-data]
+"ffsplat.conf.decoding_templates" = ["*.yaml"]
+"ffsplat.conf.format" = ["*.yaml"]
+
+
 [tool.mypy]
 files = ["src"]
 exclude = ["src/ffsplat/render/.*", "src/ffsplat/io/.*", "src/ffsplat/cli/.*", "src/ffsplat/models_v0/.*", "src/ffsplat/datasets/.*", "extern/viser/.*"]
