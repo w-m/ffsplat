@@ -768,10 +768,7 @@ class Runner:
             encoding_params=encoding_params,
             output_path=output_path,
             fields=self.conv_tool.input_gaussians.to_field_dict(),
-            decoding_params=DecodingParams(
-                container_identifier="smurfx",
-                container_version="0.1",
-                packer="ffsplat-v0.1",
+            decoding_params=DecodingParams.default_ffsplat_packer(
                 profile=encoding_params.profile,
                 profile_version=encoding_params.profile_version,
                 scene=encoding_params.scene,

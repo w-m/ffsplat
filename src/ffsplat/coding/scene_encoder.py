@@ -1,4 +1,5 @@
 import copy
+import importlib.metadata
 import json
 from collections import defaultdict
 from collections.abc import Iterable
@@ -13,6 +14,9 @@ import yaml
 from ..models.fields import Field, FieldDict
 from ..models.gaussians import Gaussians
 from ..models.operations import Operation
+
+CONTAINER_IDENTIFIER = "smurfx"
+CONTAINER_VERSION = "0.1"
 
 
 class SerializableDumper(yaml.SafeDumper):
@@ -81,6 +85,32 @@ class DecodingParams:
 
     ops: list[dict[str, Any]] = field(default_factory=list)
     scene: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def default_ffsplat_packer(
+        cls,
+        profile: str,
+        profile_version: str,
+        meta: dict[str, Any] | None = None,
+        ops: list[dict[str, Any]] | None = None,
+        scene: dict[str, Any] | None = None,
+    ) -> "DecodingParams":
+        """Create a default DecodingParams instance for the ffsplat packer."""
+        try:
+            version = importlib.metadata.version("ffsplat")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        packer = f"ffsplat-{version}"
+        return cls(
+            container_identifier=CONTAINER_IDENTIFIER,
+            container_version=CONTAINER_VERSION,
+            packer=packer,
+            profile=profile,
+            profile_version=profile_version,
+            meta=meta or {},
+            ops=ops or [],
+            scene=scene or {},
+        )
 
     def reverse_ops(self) -> None:
         """The operations we're accumulation during encoding need to be reversed for decoding."""
@@ -219,10 +249,7 @@ def encode_gaussians(gaussians: Gaussians, output_path: Path, output_format: str
         encoding_params=encoding_params,
         output_path=output_path,
         fields=gaussians.to_field_dict(),
-        decoding_params=DecodingParams(
-            container_identifier="smurfx",
-            container_version="0.1",
-            packer="ffsplat-v0.1",
+        decoding_params=DecodingParams.default_ffsplat_packer(
             profile=encoding_params.profile,
             profile_version=encoding_params.profile_version,
             scene=encoding_params.scene,
