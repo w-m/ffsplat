@@ -1473,13 +1473,15 @@ transformation_map = {
 
 
 def apply_transform(
-    parentOp: "Operation", verbose: bool, decoding_params_hashable: str
+    parentOp: "Operation", verbose: bool, decoding_params_hashable: str | None
 ) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
     transformation = transformation_map.get(parentOp.transform_type)
     if transformation is None:
         raise ValueError(f"Unknown transformation: {parentOp.transform_type}")
     elif transformation is WriteFile:
-        decoding_ops: list[dict[str, Any]] = yaml.load(decoding_params_hashable, Loader=yaml.SafeLoader)["ops"]
+        decoding_ops: list[dict[str, Any]] = []
+        if decoding_params_hashable is not None:
+            decoding_ops = yaml.load(decoding_params_hashable, Loader=yaml.SafeLoader)["ops"]
         return transformation.apply(
             parentOp.params[parentOp.transform_type], parentOp, verbose=verbose, decoding_ops=decoding_ops
         )

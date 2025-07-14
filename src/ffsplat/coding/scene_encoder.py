@@ -182,11 +182,11 @@ SerializableDumper.add_multi_representer(object, SerializableDumper.represent_ge
 
 
 @lru_cache
-def process_operation(op: Operation, verbose: bool, decoding_ops: str) -> tuple[dict[str, Field], list[dict[str, Any]]]:
+def process_operation(op: Operation, verbose: bool) -> tuple[dict[str, Field], list[dict[str, Any]]]:
     """Process the operation and return the new fields and decoding updates."""
     if verbose:
         print(f"Encoding {op}...")
-    return op.apply(verbose=verbose, decoding_params_hashable=decoding_ops)
+    return op.apply(verbose=verbose)
 
 
 @dataclass
@@ -205,9 +205,12 @@ class SceneEncoder:
             input_fields_params = op_params["input_fields"]
             for transform_param in op_params["transforms"]:
                 op = Operation.from_json(input_fields_params, transform_param, self.fields, self.output_path)
-                new_fields, decoding_updates = process_operation(
-                    op, verbose=verbose, decoding_ops=self.decoding_params.to_yaml()
-                )
+                if op.transform_type != "write_file":
+                    new_fields, decoding_updates = process_operation(op, verbose=verbose)
+                else:
+                    new_fields, decoding_updates = op.apply(
+                        verbose=verbose, decoding_params_hashable=self.decoding_params.to_yaml()
+                    )
                 #  if the coding_updates are not a copy the cache will be wrong
                 for decoding_update in copy.deepcopy(decoding_updates):
                     # if the last decoding update has the same input fields we can combine the transforms into one list
