@@ -432,7 +432,7 @@ class Reparametrize(Transformation):
                     "input_fields": [f"{to_fields_with_prefix}indices", f"{to_fields_with_prefix}values"],
                     "transforms": [
                         {
-                            "reparametize": {
+                            "reparametrize": {
                                 "method": "unpack_quaternions",
                                 "from_fields_with_prefix": to_fields_with_prefix,
                                 "dim": -1,
@@ -1114,7 +1114,7 @@ class WriteFile(Transformation):
                 field_names = list(parentOp.input_fields.keys())
                 meta: dict[str, Any] = {
                     "packer": "ffsplat",
-                    "version": 1,
+                    "version": 1.0,
                 }
                 # Readfile no input_fields
                 for field_name in field_names:
@@ -1457,7 +1457,7 @@ transformation_map = {
     "flatten": Flatten,
     "reshape": Reshape,
     "remapping": Remapping,
-    "reparametize": Reparametrize,
+    "reparametrize": Reparametrize,
     "to_field": ToField,
     "permute": Permute,
     "to_dtype": ToDType,
