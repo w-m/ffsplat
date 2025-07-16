@@ -69,5 +69,7 @@ class Operation:
             "params": self.params,
         }
 
-    def apply(self, verbose: bool, decoding_params_hashable: str) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
+    def apply(
+        self, verbose: bool, decoding_params_hashable: str | None = None
+    ) -> tuple[dict[str, "Field"], list[dict[str, Any]]]:
         return apply_transform(self, verbose=verbose, decoding_params_hashable=decoding_params_hashable)
