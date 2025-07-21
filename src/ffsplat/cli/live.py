@@ -382,21 +382,11 @@ class InteractiveConversionTool:
                 self.viewer.eval_table.content = self.table_base + self.table_rows + self.table_end
 
     def full_evaluation(self, _):
-        self.disable_load_buttons()
-        self.disable_convert_ui()
         self.viewer.eval_button.disabled = True
         self.viewer.eval_info.visible = True
-        self.viewer.eval_info.content = "Running evaluation..."
-        self.update_eval_progress(0)
-        self.viewer.eval_progress.visible = True
+        self.viewer.eval_info.content = "Waiting for other jobs to finish..."
 
         self.runner.run_evaluation()
-
-        self.viewer.eval_info.visible = False
-        self.viewer.eval_progress.visible = False
-        self.viewer.eval_button.disabled = False
-        self.enable_convert_ui()
-        self.enable_load_buttons()
 
     def _build_transform_folder(self, transform_folder, operation, transformation, transform_type):
         # clear transform folder for rebuild
@@ -577,6 +567,22 @@ class InteractiveConversionTool:
         self.viewer._convert_button.disabled = False
         self.viewer._live_preview_checkbox.disabled = False
 
+    def show_eval_ui(self):
+        self.viewer.eval_info.visible = True
+        self.viewer.eval_info.content = "Running evaluation..."
+        self.update_eval_progress(0)
+        self.viewer.eval_progress.visible = True
+        self.viewer.eval_button.disabled = True
+        self.disable_load_buttons()
+        self.disable_convert_ui()
+
+    def hide_eval_ui(self):
+        self.viewer.eval_info.visible = False
+        self.viewer.eval_progress.visible = False
+        self.viewer.eval_button.disabled = False
+        self.enable_convert_ui()
+        self.enable_load_buttons()
+
     # Create render function with bound parameters
     def bound_render_fn(self, camera_state: CameraState, img_wh: tuple[int, int]) -> NDArray:
         return self.render_fn(
@@ -643,7 +649,7 @@ class InteractiveConversionTool:
         if self.live_preview_active:
             self.runner.save_live_preview()
         else:
-            self.runner.run_conversion(copy.deepcopy(self.encoding_params))
+            self.runner.run_conversion(copy.deepcopy(self.encoding_params), self.viewer._output_dropdown.value)
 
     def update_eval_progress(self, value: int):
         self.viewer.eval_progress.value = 0
@@ -734,17 +740,17 @@ class Runner:
                     self.preview_in_scenes = True
 
                 try:
-                    self._convert(encoding_params, output_path)
+                    self._convert(encoding_params, output_path, None)
                 except Exception as e:
                     print(f"Exception occurred: {e}")
                     self.conv_tool.viewer.scene_label.content = "Conversion for live preview failed."
 
-    def run_conversion(self, new_encoding_params: EncodingParams):
+    def run_conversion(self, new_encoding_params: EncodingParams, output_format: str):
         with self.process_lock:
             self.conv_tool.disable_convert_ui()
             output_path = Path(self.conv_tool.temp_dir.name + f"/gaussians{len(self.conv_tool.scenes)}")
             try:
-                self._convert(new_encoding_params, output_path)
+                self._convert(new_encoding_params, output_path, output_format)
             except Exception as e:
                 self.conv_tool.enable_convert_ui()
                 print(f"Exception occurred: {e}")
@@ -754,6 +760,7 @@ class Runner:
     # Do we want to modify this, so that the evaluation runs in the background and does not load every scene?
     def run_evaluation(self):
         with self.process_lock:
+            self.conv_tool.show_eval_ui()
             for scene in self.conv_tool.scenes:
                 if scene.scene_metrics is None:
                     self.conv_tool.viewer.eval_info.content = f"Running evaluation for scene {scene.id}..."
@@ -761,8 +768,9 @@ class Runner:
                     self.conv_tool.load_scene(scene.id)
                     self._eval(scene.id)
                 self.conv_tool.update_eval_table()
+            self.conv_tool.hide_eval_ui()
 
-    def _convert(self, encoding_params: EncodingParams, output_path: Path):
+    def _convert(self, encoding_params: EncodingParams, output_path: Path, output_format: str | None):
         print("Converting scene...")
         encoder = SceneEncoder(
             encoding_params=encoding_params,
@@ -778,7 +786,9 @@ class Runner:
 
         # add scene to scene list and load it to view the scene
         if not self.conv_tool.live_preview_active:
-            self.conv_tool.add_scene(self._build_description(encoding_params), output_path, "smurfx", encoding_params)
+            self.conv_tool.add_scene(
+                self._build_description(encoding_params, output_format), output_path, "smurfx", encoding_params
+            )
         else:
             self.conv_tool.add_scene("Live preview from conversion", output_path, "smurfx", encoding_params)
         self.conv_tool.viewer.rerender(None)
@@ -825,9 +835,7 @@ class Runner:
         })
         self.conv_tool.scenes[scene_id].scene_metrics = stats
 
-    def _build_description(self, encoding_params: EncodingParams) -> str:
-        output_format = self.conv_tool.viewer._output_dropdown.value
-
+    def _build_description(self, encoding_params: EncodingParams, output_format: str) -> str:
         description = "**Template**  \n"
         description += f"{output_format}  \n"
         changed_params_desc = ""
