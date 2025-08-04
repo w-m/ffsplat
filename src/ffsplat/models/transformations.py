@@ -1070,7 +1070,11 @@ class WriteFile(Transformation):
         decoding_update: list[dict[str, Any]] = []
         match params:
             case {"type": "ply", "file_path": file_path, "base_path": base_path, "field_prefix": field_prefix}:
-                fields_to_write = {name[len(field_prefix) :]: field for name, field in parentOp.input_fields.items()}
+                fields_to_write: dict[str, Field] = {}
+                for name, field in parentOp.input_fields.items():
+                    if field.data.shape[-1] == 1:
+                        field.data = field.data.squeeze(-1)
+                    fields_to_write[name[len(field_prefix) :]] = field
                 decoding_update.append({
                     "input_fields": [],
                     "transforms": [

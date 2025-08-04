@@ -38,8 +38,8 @@ from ..render.viewer import CameraState, Viewer
 available_output_format: list[str] = [
     "SOG-PlayCanvas",
     "SOG-web",
-    "3DGS-INRIA-ply",
-    "3DGS-INRIA-nosh-ply",
+    "3DGS-INRIA.ply",
+    "3DGS-INRIA-nosh.ply",
     "SOG-web-png",
     "SOG-web-nosh",
     "SOG-web-sh-split",
