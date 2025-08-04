@@ -1073,7 +1073,6 @@ class WriteFile(Transformation):
                 fields_to_write: dict[str, Field] = {}
                 for name, field in parentOp.input_fields.items():
                     if field.data.shape[-1] == 1:
-                        # Squeeze the last dimension if it is 1
                         field.data = field.data.squeeze(-1)
                     fields_to_write[name[len(field_prefix) :]] = field
                 decoding_update.append({
