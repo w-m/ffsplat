@@ -15,8 +15,18 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "gsplat==1.4.0",
-    "torch==2.6.0",
+    # The differentiable rasterizer, provided per platform. Upstream gsplat is CUDA-only (its
+    # extension JIT-builds against nvcc at the first call), so Apple Silicon uses mpsplat, the
+    # MPS/Metal port. Both distributions ship the same top-level package name, so
+    # `import gsplat` is unchanged. mpsplat publishes no wheels and its own MANIFEST.in omits
+    # the `.metal` sources, so the pin is a fork that ships them (zacsmms/mpsplat#1); it moves
+    # back to zacsmms/mpsplat once that is merged.
+    "gsplat==1.4.0 ; sys_platform != 'darwin'",
+    "mpsplat @ git+https://github.com/HenryGetz/mpsplat@8b9f317f4de2f6087730ea432d5e2d369eeaf720 ; sys_platform == 'darwin'",
+    # 2.14.1 on Apple Silicon only: mpsplat's Metal kernels need `torch.mps.compile_shader`,
+    # which 2.6.0 does not have. Every other platform keeps the upstream pin.
+    "torch==2.6.0 ; sys_platform != 'darwin'",
+    "torch==2.14.1 ; sys_platform == 'darwin'",
     "jaxtyping>=0.2.25,<0.3.0",
     "numpy>=2.0.0,<3.0.0",
     "plyfile>=1.1.0,<2.0.0",
@@ -32,17 +42,19 @@ dependencies = [
     "tqdm>=4.67.1,<5.0.0",
     "torchvision>=0.21.0,<1.0.0",
     "torchmetrics>=1.6.1,<2.0.0",
-    "torchpq>=0.3.0.6,<0.4.0", # kmeans clustering
-    "cupy-cuda12x>=13.4.1,<14.0.0", # torchpq dependency
     "camorph @ git+https://github.com/Fraunhofer-IIS/camorph@2c95c8b15b0532d6280091761a9b51ab65cd2f98",
     "plas @ git+https://github.com/fraunhoferhhi/PLAS.git@4f1109c94f29a5a6de62bdf8f20cb3ce1ff0e680",
     "viser @ git+https://github.com/w-m/viser.git@03b87b8c1521a0afe79d885e684f1cb0b3323294",
 ]
 
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
+[tool.uv]
+# PLAS (github.com/fraunhoferhhi/PLAS) lists `lapjv` in install_requires, but its
+# runtime package (`plas/core.py`, `plas/vad.py`) imports only numpy/torch/kornia/tqdm.
+# `lapjv` is used solely by PLAS's upstream evaluation script `eval/flas.py`, which
+# ffsplat never imports. lapjv's own setup.py has no Darwin branch
+# ("not supported anymore due to M1, PRs welcome"), so every published version fails
+# to build on this Apple-Silicon host. Drop it on macOS only; Linux/CUDA is unaffected.
+override-dependencies = ["lapjv; sys_platform != 'darwin'"]
 
 [project.urls]
 Homepage = "https://w-m.github.io/ffsplat/"
@@ -157,7 +169,12 @@ ignore = [
 [tool.ruff.format]
 preview = true
 
+[tool.deptry.package_module_name_map]
+# `mpsplat` is the Apple-Silicon distribution of the `gsplat` package (see `dependencies`); it is
+# not installed at all on other platforms, so deptry cannot infer the mapping from the environment
+# and would report the dependency as unused.
+mpsplat = "gsplat"
+
 [tool.deptry.per_rule_ignores]
-# cupy required for kmeans in torchpq, but we don't import it explicitly in the code base
 # torchvision is required for torchmetrics
-DEP002 = ["cupy-cuda12x", "torchvision"]
+DEP002 = ["torchvision"]

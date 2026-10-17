@@ -32,6 +32,7 @@ from ..coding.scene_encoder import DecodingParams, EncodingParams, SceneEncoder
 from ..datasets.blenderparser import BlenderParser
 from ..datasets.colmapparser import ColmapParser
 from ..datasets.dataset import Dataset
+from ..device import resolve_device, warn_if_not_metal
 from ..models.transformations import get_dynamic_params
 from ..render.viewer import CameraState, Viewer
 
@@ -269,10 +270,11 @@ class InteractiveConversionTool:
         self.dataset: Path = dataset_path
         self.verbose = verbose
         self.scenes: list[SceneData] = []
+        self.device: torch.device = resolve_device()
 
         # Load gaussians
         self.input_gaussians = decode_gaussians(input_path=input_path, input_format=input_format, verbose=self.verbose)
-        self.input_gaussians = self.input_gaussians.to("cuda")
+        self.input_gaussians = self.input_gaussians.to(self.device)
 
         # set the current gaussians to the input gaussians
         self.current_scene = 0
@@ -366,7 +368,7 @@ class InteractiveConversionTool:
         # load scene
         scene = self.scenes[scene_id]
         self.gaussians = decode_gaussians(scene.data_path, input_format=scene.input_format, verbose=self.verbose).to(
-            "cuda"
+            self.device
         )
 
         self.viewer.rerender(None)
@@ -535,10 +537,13 @@ class InteractiveConversionTool:
         width, height = img_wh
         camera_c2w = camera_state.c2w
         camera_K = camera_state.get_K(img_wh)
-        c2w: Float[Tensor, "4 4"] = torch.from_numpy(camera_c2w).float().to("cuda")
-        K: Float[Tensor, "3 3"] = torch.from_numpy(camera_K).float().to("cuda")
+        # Keep the camera on the same device as the Gaussians (MPS on Apple Silicon).
+        device = means_t.device
+        c2w: Float[Tensor, "4 4"] = torch.from_numpy(camera_c2w).float().to(device)
+        K: Float[Tensor, "3 3"] = torch.from_numpy(camera_K).float().to(device)
         viewmat: Float[Tensor, "4 4"] = torch.linalg.inv(c2w)
         # We need to separate the type annotation from the unpacking
+        warn_if_not_metal(sh_degree, means_t.device)
         raster_out: tuple[Float[Tensor, "1 H W 4"], Tensor, dict] = rasterization(
             means_t,  # [N, 3]
             quats_t,  # [N, 4]
@@ -785,7 +790,7 @@ class Runner:
 
     def _eval(self, scene_id):
         print(f"Running evaluation for scene {scene_id}")
-        device = "cuda"
+        device = self.conv_tool.device
         ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
         psnr = PeakSignalNoiseRatio(data_range=1.0).to(device)
         lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=False).to(device)

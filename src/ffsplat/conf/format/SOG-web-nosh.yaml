@@ -28,7 +28,7 @@ ops:
   - input_fields: [sh]
     transforms:
       - split:
-          split_size_or_sections: [1]
+          split_size_or_sections: [1, 15]
           dim: 1
           squeeze: false
           to_field_list: [f_dc, _]

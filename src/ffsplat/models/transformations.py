@@ -14,10 +14,11 @@ from PIL import Image
 from pillow_heif import register_avif_opener  # type: ignore[import-untyped]
 from plas import sort_with_plas  # type: ignore[import-untyped]
 from torch import Tensor
-from torchpq.clustering import KMeans  # type: ignore[import-untyped]
 
+from ..device import encoding_dtype
 from ..io.ply import decode_ply, encode_ply
 from ..models.fields import Field
+from .clustering import KMeans
 
 if TYPE_CHECKING:
     from ..models.fields import Operation
@@ -30,25 +31,25 @@ def convert_to_dtype(field_data: Tensor, dtype_str: str) -> Tensor:
                 raise ValueError(
                     f"Field data out of range for uint8 conversion: {field_data.min().item()} - {field_data.max().item()}"
                 )
-            field_data = field_data.to(torch.uint8)
+            field_data = field_data.to(encoding_dtype(field_data.device, torch.uint8))
         case "uint16":
             if field_data.min() < 0 or field_data.max() > 65535:
                 raise ValueError(
                     f"Field data out of range for uint16 conversion: {field_data.min().item()} - {field_data.max().item()}"
                 )
-            field_data = field_data.to(torch.uint16)
+            field_data = field_data.to(encoding_dtype(field_data.device, torch.uint16))
         case "int32":
             if field_data.min() < -2147483648 or field_data.max() > 2147483647:
                 raise ValueError(
                     f"Field data out of range for int32 conversion: {field_data.min().item()} - {field_data.max().item()}"
                 )
-            field_data = field_data.to(torch.int32)
+            field_data = field_data.to(encoding_dtype(field_data.device, torch.int32))
         case "uint32":
             if field_data.min() < 0 or field_data.max() > 4294967295:
                 raise ValueError(
                     f"Field data out of range for uint32 conversion: {field_data.min().item()} - {field_data.max().item()}"
                 )
-            field_data = field_data.to(torch.uint32)
+            field_data = field_data.to(encoding_dtype(field_data.device, torch.uint32))
         case "float32":
             field_data = field_data.to(torch.float32)
         case _:
@@ -567,7 +568,13 @@ class Reshape(Transformation):
                     "input_fields": [field_name],
                     "transforms": [{"reshape": {"shape": field_data.shape}}],
                 })
-                field_data = field_data.reshape(*shape)
+                try:
+                    field_data = field_data.reshape(*shape)
+                except RuntimeError as exc:
+                    raise ValueError(
+                        f"Cannot reshape field {field_name!r} of shape {tuple(field_data.shape)} "
+                        f"({field_data.numel()} elements) to {list(shape)}: {exc}"
+                    ) from exc
             case _:
                 raise ValueError(f"Unknown Reshape parameters: {params}")
 
@@ -912,9 +919,7 @@ class PLAS:
         verbose: bool,
     ) -> Tensor:
         grid_to_sort = PLAS.as_grid_img(params_tensor).permute(2, 0, 1)
-        _, sorted_indices_ret = sort_with_plas(
-            grid_to_sort, improvement_break=float(plas_cfg.improvement_break), verbose=verbose
-        )
+        sorted_indices_ret = PLAS._sort_with_fallback(grid_to_sort, plas_cfg, verbose)
 
         sorted_indices: Tensor = sorted_indices_ret.squeeze(0).to(params_tensor.device)
 
@@ -927,6 +932,33 @@ class PLAS:
             return primitive_filter[sorted_indices]
 
         return sorted_indices
+
+    @staticmethod
+    def _sort_with_fallback(grid_to_sort: Tensor, plas_cfg: PLASConfig, verbose: bool) -> Tensor:
+        """Run ``sort_with_plas`` on ``grid_to_sort``'s device, falling back to CPU.
+
+        PLAS low-pass filters with ``kornia.filters.gaussian_blur2d``. Should a kornia
+        op turn out to be unavailable on a non-CPU accelerator (MPS), the whole sorting
+        call is retried once on CPU and the result moved back, instead of failing the
+        conversion. The fallback announces itself whenever it actually triggers.
+        """
+        improvement_break = float(plas_cfg.improvement_break)
+        try:
+            return PLAS._sort_on_device(grid_to_sort, improvement_break, verbose)
+        except (RuntimeError, NotImplementedError) as exc:
+            if grid_to_sort.device.type == "cpu":
+                raise
+            print(
+                f"[PLAS] sort_with_plas failed on device '{grid_to_sort.device.type}' "
+                f"({type(exc).__name__}: {exc}); retrying on CPU."
+            )
+            return PLAS._sort_on_device(grid_to_sort.cpu(), improvement_break, verbose).to(grid_to_sort.device)
+
+    @staticmethod
+    def _sort_on_device(grid: Tensor, improvement_break: float, verbose: bool) -> Tensor:
+        """Run PLAS once on ``grid``'s own device. (``plas`` ships no type information.)"""
+        _, sorted_indices = sort_with_plas(grid, improvement_break=improvement_break, verbose=verbose)
+        return torch.as_tensor(sorted_indices)
 
     @staticmethod
     def get_dynamic_params(params: dict[str, Any]) -> list[dict[str, Any]]:

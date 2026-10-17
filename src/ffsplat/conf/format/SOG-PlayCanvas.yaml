@@ -233,7 +233,12 @@ ops:
   - input_fields: [shN_centroids]
     transforms:
       - reshape:
-          shape: [-1, 960, 3] # int(num_clusters*num_spherical_harmonics/3) =
+          # The PlayCanvas splat codebook texture is a fixed 1024x960 RGB image in which every
+          # row holds 64 clusters x 45 SH coefficients / 3 channels. This only fits the standard
+          # 65536-entry codebook, i.e. scenes with >= 65536 primitives; KMeans clamps its cluster
+          # count to the number of samples, so a smaller scene cannot be packed into this layout
+          # and fails here with a ValueError.
+          shape: [-1, 960, 3]
 
   - input_fields: [shN_labels]
     transforms:

@@ -25,7 +25,15 @@ def encode_ply(fields: dict[str, Field], path: Path) -> None:
     vertex_data = np.empty(num_primitives, dtype=dtype_list)
 
     for field_name, field in fields.items():
-        vertex_data[field_name] = field.data.cpu().numpy()
+        # A PLY vertex property is a scalar, but decode paths can hand us a field
+        # with a trailing singleton dim (e.g. `to_field` on opacities, which
+        # `scene_decoder._create_scene` deliberately unsqueezes to [N, 1]).
+        # Accept only that shape and reject genuine multi-component fields
+        # instead of letting numpy raise an opaque broadcast error.
+        value = field.data.reshape(num_primitives, -1)
+        if value.shape[1] != 1:
+            raise ValueError(f"PLY property '{field_name}' must be scalar, got shape {tuple(field.data.shape)}")
+        vertex_data[field_name] = value[:, 0].cpu().numpy()
 
     vertex_element = PlyElement.describe(vertex_data, "vertex")
     PlyData([vertex_element], text=False).write(str(path))

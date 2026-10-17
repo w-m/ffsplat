@@ -1,4 +1,5 @@
 import os
+import time
 from argparse import ArgumentParser
 from collections import defaultdict
 from pathlib import Path
@@ -18,6 +19,7 @@ from ..coding.scene_decoder import decode_gaussians
 from ..datasets.blenderparser import BlenderParser
 from ..datasets.colmapparser import ColmapParser
 from ..datasets.dataset import Dataset
+from ..device import resolve_device, synchronize, warn_if_not_metal
 from ..models.gaussians import Gaussians
 
 
@@ -32,7 +34,7 @@ def rasterize_splats(
     use_white_background: bool = False,
 ) -> tuple[Tensor, Tensor, dict]:
     colors = gaussians.sh.data
-    background = torch.ones(1, colors.shape[-1], device="cuda") if use_white_background else None
+    warn_if_not_metal(gaussians.sh_degree, colors.device)
     render_colors, render_alphas, info = rasterization(
         means=gaussians.means.data,
         quats=gaussians.quaternions.data,
@@ -44,8 +46,15 @@ def rasterize_splats(
         width=width,
         height=height,
         sh_degree=gaussians.sh_degree,
-        backgrounds=background,
+        # NEVER pass `backgrounds`/`masks` here: any non-None value silently routes the call off
+        # the Metal kernels onto mpsplat's pure-torch rasterizer
+        # (mpsplat's gsplat/cuda/_wrapper.py:1102-1130), which is several times slower on MPS.
+        # The white background is composited below instead -- the rasterizer's own
+        # `color + transmittance * background` blend (transmittance = 1 - alpha).
+        backgrounds=None,
     )
+    if use_white_background:
+        render_colors = render_colors + (1.0 - render_alphas) * torch.ones(1, colors.shape[-1], device=colors.device)
     if masks is not None:
         render_colors[~masks] = 0
     return render_colors, render_alphas, info
@@ -55,25 +64,24 @@ def eval_step(
     gaussians: Gaussians,
     white_background: bool,
     results_path: Path | None,
-    device: str,
+    device: torch.device,
     step: int,
     metrics: dict[str, list],
     psnr: callable,
     ssim: callable,
     lpips: callable,
     data: dict[str, Float[NDArray, "3 3"] | Float[NDArray, "4 4"] | Float[NDArray, "N M"] | int],
-) -> None:
+) -> float:
     camtoworlds = data["camtoworld"].to(device)
     Ks = data["K"].to(device)
     pixels = data["image"].to(device)
     masks = data["mask"].to(device) if "mask" in data else None
     height, width = pixels.shape[1:3]
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-
-    torch.cuda.synchronize()
-    start_event.record()
+    # host-side timing: torch.cuda.Event is CUDA-only, so measure with perf_counter
+    # and wait through the device-agnostic synchronize() helper.
+    synchronize(device)
+    start_time = time.perf_counter()
     colors, _, _ = rasterize_splats(
         gaussians=gaussians,
         camtoworlds=camtoworlds,
@@ -83,9 +91,8 @@ def eval_step(
         masks=masks,
         use_white_background=white_background,
     )  # [1, H, W, 3]
-    end_event.record()
-    torch.cuda.synchronize()
-    elapsed_time = start_event.elapsed_time(end_event) / 1000.0
+    synchronize(device)
+    elapsed_time = time.perf_counter() - start_time
 
     colors = torch.clamp(colors, 0.0, 1.0)
     canvas_list = [pixels, colors]
@@ -122,7 +129,7 @@ def get_directory_size(path: Path) -> int:
 def evaluation(gaussians: Gaussians, valset: Dataset, data_path: Path, results_path: Path) -> None:
     """Entry for evaluation."""
     print("Running evaluation...")
-    device = "cuda"
+    device = resolve_device()
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
     psnr = PeakSignalNoiseRatio(data_range=1.0).to(device)
     lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=False).to(device)
@@ -163,7 +170,7 @@ def main():
 
     args = parser.parse_args()
 
-    gaussians = decode_gaussians(args.data_path, "smurfx").to("cuda")
+    gaussians = decode_gaussians(args.data_path, "smurfx", verbose=False).to(resolve_device())
 
     dataset_dir = args.dataset_path
 

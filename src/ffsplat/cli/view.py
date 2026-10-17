@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from torch import Tensor
 
 from ..coding.scene_decoder import decode_gaussians
+from ..device import resolve_device, warn_if_not_metal
 from ..render.viewer import CameraState, Viewer
 
 
@@ -27,10 +28,13 @@ def render_fn(
     width, height = img_wh
     camera_c2w = camera_state.c2w
     camera_K = camera_state.get_K(img_wh)
-    c2w: Float[Tensor, "4 4"] = torch.from_numpy(camera_c2w).float().to("cuda")
-    K: Float[Tensor, "3 3"] = torch.from_numpy(camera_K).float().to("cuda")
+    # Keep the camera on the same device as the Gaussians (MPS on Apple Silicon).
+    device = means_t.device
+    c2w: Float[Tensor, "4 4"] = torch.from_numpy(camera_c2w).float().to(device)
+    K: Float[Tensor, "3 3"] = torch.from_numpy(camera_K).float().to(device)
     viewmat: Float[Tensor, "4 4"] = torch.linalg.inv(c2w)
     # We need to separate the type annotation from the unpacking
+    warn_if_not_metal(sh_degree, means_t.device)
     raster_out: tuple[Float[Tensor, "1 H W 4"], Tensor, dict] = rasterization(
         means_t,  # [N, 3]
         quats_t,  # [N, 4]
@@ -79,7 +83,9 @@ def main():
 
     cfg = parser.parse_args()
 
-    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format, verbose=cfg.verbose).to("cuda")
+    gaussians = decode_gaussians(input_path=cfg.input, input_format=cfg.input_format, verbose=cfg.verbose).to(
+        resolve_device()
+    )
 
     # The bound_render_fn needs the gaussians object. We can bind it here.
     render_fn_for_viewer = lambda camera_state, img_wh: bound_render_fn(camera_state, img_wh, gaussians)
